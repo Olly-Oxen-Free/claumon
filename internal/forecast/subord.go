@@ -27,6 +27,25 @@ func sampleGammaMeanVar(rng *rand.Rand, mean, variance float64) float64 {
 	return sampleGamma(rng, shape, scale)
 }
 
+// sampleRateRectNorm draws the per-path rate for the §8 Monte Carlo from the
+// rectified Gaussian max(0, N(mean, variance)) (model v2.2). v2.0-v2.1
+// moment-matched a Gamma instead, which degenerates when the posterior mean
+// is small relative to its standard deviation: shape = mean²/variance → 0
+// concentrates every draw at 0, collapsing the MC terminal distribution to a
+// point mass at u_now (CI "49%-49%", p_inf = 1) exactly when the evidence is
+// weakest. Rectification maps the Gaussian posterior's negative-rate mass to
+// an atom at exactly 0: "the rate may well stay zero" remains a possible
+// world (paths that never grow - the empirically dominant outcome for
+// abandoned sessions), while the positive tail keeps the fan open with the
+// bar_tau²-floored spread. When mean >> sd the draw converges to the same
+// N(mean, variance) the Gamma matched.
+func sampleRateRectNorm(rng *rand.Rand, mean, variance float64) float64 {
+	if variance <= 0 {
+		return math.Max(mean, 0)
+	}
+	return math.Max(mean+math.Sqrt(variance)*rng.NormFloat64(), 0)
+}
+
 // sampleGamma draws from Gamma(shape, scale) by Marsaglia & Tsang (2000). It
 // needs only standard-normal and uniform draws, both taken from the
 // deterministic rng eta.go seeds, so trajectories remain reproducible for a

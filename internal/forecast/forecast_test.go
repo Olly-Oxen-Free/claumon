@@ -474,6 +474,83 @@ func TestSampleGammaMeanVar(t *testing.T) {
 	}
 }
 
+func TestSampleRateRectNorm(t *testing.T) {
+	const n = 200000
+
+	// Strong-evidence regime (mean >> sd): rectification is negligible, so
+	// the draw matches the Gaussian posterior's first two moments.
+	rng := rand.New(rand.NewSource(42))
+	const mean, variance = 0.5, 0.01 // mean = 5 sd
+	var sum, sumSq float64
+	for i := 0; i < n; i++ {
+		x := sampleRateRectNorm(rng, mean, variance)
+		if x < 0 {
+			t.Fatalf("negative rate draw: %v", x)
+		}
+		sum += x
+		sumSq += x * x
+	}
+	gotMean := sum / n
+	gotVar := sumSq/n - gotMean*gotMean
+	approxEq(t, "rect-norm mean", gotMean, mean, 0.02, 0.005)
+	approxEq(t, "rect-norm var", gotVar, variance, 0.05, 0.005)
+
+	// Degenerate-evidence regime (mean ≈ 0, variance > 0): half the mass is
+	// an atom at exactly 0 ("may stay flat") and the rest fans out; the mean
+	// is sd/sqrt(2*pi), NOT a point mass at 0. This is the regime where the
+	// v2.0/v2.1 moment-matched Gamma collapsed.
+	rng = rand.New(rand.NewSource(7))
+	const sd = 0.1
+	var s2 float64
+	zeros := 0
+	for i := 0; i < n; i++ {
+		x := sampleRateRectNorm(rng, 1e-26, sd*sd)
+		s2 += x
+		if x == 0 {
+			zeros++
+		}
+	}
+	approxEq(t, "rect-norm zero-mean mean", s2/n, sd/math.Sqrt(2*math.Pi), 0.02, 0.001)
+	approxEq(t, "rect-norm atom at zero", float64(zeros)/n, 0.5, 0.02, 0.005)
+
+	// Degenerate cases collapse cleanly.
+	if got := sampleRateRectNorm(rng, -0.1, 0); got != 0 {
+		t.Errorf("negative mean with zero variance should give 0, got %v", got)
+	}
+	if got := sampleRateRectNorm(rng, 0.3, 0); got != 0.3 {
+		t.Errorf("zero variance should give the mean, got %v", got)
+	}
+}
+
+func TestSampleMCZeroRateStillFansOut(t *testing.T) {
+	// Regression test for the flat weekly forecast: a plateau in the recent
+	// window drives the posterior rate to numeric zero while the BarTauSq
+	// floor keeps rate variance positive. The v2.0/v2.1 Gamma rate draw
+	// degenerated to a point mass (all paths flat, CI collapsed to
+	// [uNow, uNow], p_inf = 1); the v2.2 truncated-Gaussian draw must keep
+	// the fan open.
+	now := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
+	reset := now.Add(48 * time.Hour)
+	post := Posterior{RHat: 2e-26, TauPostSq: 0, UsedOLS: true}
+	cal := Calibration{SigmaSessionSq: 1e-4, BarTauSq: 1e-4}
+	const uNow = 0.49
+
+	s, ok := SampleMC(now, reset, uNow, post, cal, 1.0, DefaultConfig())
+	if !ok {
+		t.Fatal("SampleMC returned !ok")
+	}
+	lo, hi := terminalCI(s.Terminal)
+	if hi <= lo {
+		t.Fatalf("terminal CI collapsed: [%v, %v]", lo, hi)
+	}
+	if hi <= uNow+1e-6 {
+		t.Fatalf("upper CI edge did not move above uNow: %v", hi)
+	}
+	if s.PInf >= 1 {
+		t.Fatalf("p_inf = 1: no path ever crosses despite positive rate variance")
+	}
+}
+
 func TestSampleMCPathsAreMonotone(t *testing.T) {
 	// Core realism property of model v2.0: with positive-only increments the MC
 	// trajectories never decrease (so the fan-chart no longer dips).

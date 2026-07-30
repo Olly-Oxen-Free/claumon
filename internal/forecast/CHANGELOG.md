@@ -8,7 +8,38 @@ ETAs, or calibration semantics, the prior `MODEL.tex` (and its PDF) moves to
 Bug fixes that bring the implementation back in line with the existing spec
 do **not** bump the model version — only changes to the spec itself do.
 
-## v2.1 - 2026-06-10 (current)
+## v2.2 - 2026-07-30 (current)
+
+Replaces the Monte Carlo's per-path **rate draw**: a rectified Gaussian
+`max(0, N(r_hat_post, tau_eff^2))` instead of a Gamma moment-matched to the
+same mean and variance. Path increments remain Gamma (the v2.0 subordinator);
+only the rate mixture changes.
+
+- **Why.** The Gamma family cannot represent "mean near zero, variance
+  positive": its shape `r_hat^2/tau_eff^2 -> 0` concentrates all practical
+  mass at 0 (the nominal variance rides on astronomically rare tail draws,
+  and the sampler underflows to exactly 0 well before that). In the field
+  this fired whenever the recent window was a plateau - common for the
+  slow-moving weekly gauge - and collapsed the MC terminal distribution to a
+  point mass at `u_now`: the UI showed "80% CI 49%-49%" with `p_inf = 1`,
+  claiming certainty exactly where the evidence is weakest, while `sigma_pct`
+  simultaneously reported ~21 points of analytic spread.
+- **Rectified, not truncated.** The rectified Gaussian keeps the posterior's
+  negative-rate mass as an atom at exactly 0, so "no further growth" remains
+  a possible world with honest probability - the empirically dominant outcome
+  for abandoned sessions. (A renormalized truncated Gaussian was tried first
+  and benched worse: with no mass at zero it always predicts some growth,
+  pushing the CI's lower edge above truly-flat outcomes.)
+- **Benchmark (real exports, LOSO).** Session gauge: 80% coverage 55% -> 89%,
+  CRPS 0.0813 -> 0.0803. Weekly gauge: coverage 73% -> 74%, CRPS 0.0852 ->
+  0.0844. The coverage repair is the point; CRPS improving alongside confirms
+  it is not bought with a blind widening.
+- **Unchanged.** Point forecast `F`, `sigma_F` moments, rate estimation,
+  calibration, increment law, first-passage and reporting rules all carry
+  over. The `r_post <= 0` edge case changes from "paths stay flat, ETA nil"
+  to "paths fan out per the floored rate variance, with >= 50% exactly flat".
+
+## v2.1 - 2026-06-10
 
 Removes the cap at 1 on the reported 80% CI upper edge, so both interval
 edges are now the raw MC terminal percentiles (p10/p90), uncapped.

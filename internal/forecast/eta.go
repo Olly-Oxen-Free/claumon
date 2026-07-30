@@ -89,12 +89,12 @@ func runMC(now, reset time.Time, uNow float64, post Posterior, cal Calibration, 
 		nSteps = 1
 	}
 	dt := horizon.Seconds() / float64(nSteps) / 3600.0
-	// Monotone dynamics (model v2.0): the per-path rate and each per-step
-	// increment are Gamma-distributed, matching the Brownian model's first two
-	// moments (mean r_k*dt, variance sigma_session^2*dt per step; rate variance
-	// floored by bar_tau^2 across paths) but staying non-negative, so paths
-	// never decrease and never need clipping. When a path must finish at reset,
-	// its terminal value feeds the forecast CI quantiles.
+	// Monotone dynamics: the per-path rate is a rectified Gaussian draw
+	// (model v2.2; rate variance floored by bar_tau^2 across paths), and each
+	// per-step increment is Gamma-distributed (model v2.0) with mean r_k*dt
+	// and variance sigma_session^2*dt. Every draw is non-negative, so paths
+	// never decrease and never need clipping. When a path must finish at
+	// reset, its terminal value feeds the forecast CI quantiles.
 	incVarStep := cal.SigmaSessionSq * dt
 	rateVar := math.Max(EffectiveRateVar(post.TauPostSq, cal.BarTauSq), 0)
 
@@ -110,7 +110,7 @@ func runMC(now, reset time.Time, uNow float64, post Posterior, cal Calibration, 
 	}
 
 	for k := 0; k < K; k++ {
-		rk := sampleGammaMeanVar(rng, post.RHat, rateVar)
+		rk := sampleRateRectNorm(rng, post.RHat, rateVar)
 
 		var path []float64
 		if collectTraj {

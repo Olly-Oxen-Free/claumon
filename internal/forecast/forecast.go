@@ -13,7 +13,7 @@ import (
 // calibration semantics - bug fixes that match the spec don't count. The
 // CHANGELOG in MODEL.tex tracks what each bump means, and retired specs
 // live under internal/forecast/archive/<this-value>/.
-const ModelVersion = "v2.1"
+const ModelVersion = "v2.2"
 
 // UIThresholdPct is the crossing threshold (in percent) the dashboard forecasts
 // against. The gauge poller and the trajectory popup both use it, so the two

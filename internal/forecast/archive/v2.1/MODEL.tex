@@ -48,7 +48,7 @@
 
 \title{Rate-Limit Forecast Model}
 \author{claumon \texttt{internal/forecast}}
-\date{Model version \textbf{v2.2} \enspace - \enspace 2026-07-30}
+\date{Model version \textbf{v2.1} \enspace - \enspace 2026-06-10}
 
 \begin{document}
 \maketitle
@@ -124,12 +124,10 @@ intervals are independent, so the process is monotone non-decreasing by
 construction. The rate $r$ is itself unknown and non-negative, with mean
 $\rpost$ and variance $\max(\taupostsq, \bar\tau^2)$
 (\S\ref{sec:rate}, \S\ref{sec:calib}); the Monte Carlo (\S\ref{sec:eta}) draws
-it from the rectified Gaussian $\max(0,\, \mathcal{N}(\rpost,
-\max(\taupostsq,\bar\tau^2)))$ (v2.2). (The \S\ref{sec:rate} posterior on $r$
-is Gaussian; a negative rate is unphysical here and would leave the Gamma
-increment ill-defined, so the negative-rate mass is rectified to an atom at
-exactly $0$: ``no further growth'' stays a possible world with its posterior
-probability.) Three assumptions:
+it from a Gamma matched to those moments. (The \S\ref{sec:rate} posterior on
+$r$ is Gaussian; we sample a moment-matched Gamma instead so the drawn rate
+stays positive, since a negative rate is unphysical here and would leave the
+Gamma increment ill-defined.) Three assumptions:
 
 \begin{enumerate}
   \item \textbf{Constant mean rate.} $r$ is constant within a window.
@@ -168,27 +166,6 @@ The cost is that the forecast law is no longer Gaussian, so the CI and the ETA
 are both read off the Monte Carlo of \S\ref{sec:eta} rather than a closed-form
 $z$-quantile. The point forecast $F$ and its moment variance $\sigma_F^2$
 (\S\ref{sec:forecast}) are unchanged.
-
-\paragraph{Why a rectified-Gaussian rate (v2.2).} v2.0 drew the per-path rate
-from a Gamma moment-matched to $(\rpost, \max(\taupostsq,\bar\tau^2))$. The
-Gamma family cannot represent ``mean near zero, variance positive'': its shape
-parameter $\rpost^2/\max(\taupostsq,\bar\tau^2) \to 0$ concentrates all
-practical mass at $0$ (the nominal variance is carried by astronomically rare
-tail draws, and the sampler underflows to exactly $0$ well before that). In
-the field this fired whenever the recent window was a plateau - common for
-the slow-moving weekly gauge - and collapsed the MC terminal distribution to
-a point mass at $\unow$: the UI reported ``80\% CI $49\%$--$49\%$'' with
-$p_\infty = 1$, an assertion of certainty exactly where the evidence is
-weakest. The rectified Gaussian $\max(0, \mathcal{N})$ is the natural
-non-negative push-forward of the \S\ref{sec:rate} Gaussian posterior: it
-converges to the same $\mathcal{N}(\rpost, \cdot)$ the Gamma matched when
-$\rpost$ dominates its standard deviation, keeps the fan open with the
-$\bar\tau^2$-floored spread when $\rpost \approx 0$, and its atom at $0$
-retains ``no further growth'' as an outcome with honest probability - the
-empirically dominant outcome for abandoned sessions. On the real-data
-benchmark (LOSO) this moved session-gauge 80\% coverage from $55\%$ to
-$89\%$ and weekly from $73\%$ to $74\%$, with CRPS slightly improved on
-both.
 
 \section{Notation}
 
@@ -296,8 +273,8 @@ where $\taupostsq$ is large (few snapshots) the conjugate value should win.
 rather than a Bayesian update: $\max(\taupostsq,\, \bar\tau^2)$ is not the
 variance of any coherent posterior over $r$, so $\sigma_F^2$ should be read as
 the predictive variance with $\taupostsq$ replaced by an empirical lower bound.
-In v2.x the marginal forecast is the right-skewed Monte Carlo law (\S\ref{sec:eta}: draw
-$r$ from the rectified Gaussian of mean $\rpost$ and variance $\max(\taupostsq,\bar\tau^2)$,
+In v2.0 the marginal forecast is the right-skewed Monte Carlo law (\S\ref{sec:eta}: draw
+$r$ from a Gamma of mean $\rpost$ and variance $\max(\taupostsq,\bar\tau^2)$,
 then accumulate Gamma increments of per-step variance $\sigsessionsq\,dt$), but
 $\sigma_F^2$ remains its variance, with two contributions at different scales:
 rate uncertainty is quadratic in horizon (dominates at long horizons), path
@@ -453,25 +430,24 @@ with random rate has no tractable closed form. Simulate $K = 500$ trajectories
 \S\ref{sec:forecast} CI):
 
 \begin{lstlisting}
-tau_eff^2 = max(tau_post^2, bar_tau^2)                # rate-variance floor
+tau_eff^2 = max(tau_post^2, bar_tau^2)              # rate-variance floor
 for k in 1..K:
-    r_k    = max(0, Normal(r_hat_post, tau_eff^2))    # rectified, >= 0
+    r_k    = Gamma(mean=r_hat_post, var=tau_eff^2)  # >= 0
     u_k[0] = u_now
     for j in 1..M, dt = step size of jth bucket:
         u_k[j] = u_k[j-1] + Gamma(mean=r_k*dt, var=sigma_session^2*dt)
     T*_k = linear interpolation of first j with u_k[j] >= C_thr
          = infinity if none
-    U_k  = u_k[M]                                     # terminal -> forecast CI
+    U_k  = u_k[M]                                   # terminal -> forecast CI
 \end{lstlisting}
 
 The rate and every increment are non-negative, so each path is monotone: once
 $u_k$ crosses $\Cthr$ it stays above, and the first crossing is final (no dip
-and re-cross). A zero or near-zero rate draw simply never reaches $\Cthr$
-within the window, yielding $\Tstark = \infty$ - the correct outcome under
-the model, and the non-negative analogue of v1.x's downward-drift paths. The
-increment sampler is Gamma (Marsaglia-Tsang~\cite{marsaglia2000}); both it and
-the rectified-Gaussian rate draw reuse the same seeded RNG, so trajectories
-stay reproducible.
+and re-cross). A near-zero rate draw simply never reaches $\Cthr$ within the
+window, yielding $\Tstark = \infty$ - the correct outcome under the model,
+and the non-negative analogue of v1.x's downward-drift paths. The Gamma
+sampler (Marsaglia-Tsang~\cite{marsaglia2000}) reuses the same seeded RNG, so
+trajectories stay reproducible.
 
 \paragraph{Reported summaries.} Let $p_\infty$ be the fraction of
 trajectories with $\Tstark = \infty$. Define $\tilde\Tstar_{\text{MC}} =
@@ -508,11 +484,8 @@ Reset detected in $\mathcal{R}$ ($u_{i+1} < u_i$)
 $\Cthr \leq \unow$
   & Threshold already crossed; return $\Tstar = \tnow$ \\
 $\rpost \leq 0$
-  & Rectified rate draw becomes half-normal (or colder): paths still fan out
-    with the $\bar\tau^2$-floored spread, and $\ge 50\%$ of draws sit at
-    exactly $0$ (flat). $p_\infty$ and the CI reflect that mixture honestly
-    instead of collapsing to a point mass at $\unow$ (the v2.0--v2.1
-    behaviour) \\
+  & Gamma rate degenerates to $0$ (no growth): MC paths stay flat, so
+    $p_\infty \to 1$ and the ETA is \texttt{nil} \\
 $F > 1$
   & Report as-is: overshoot is projected demand beyond the limit and its
     magnitude is signal; only the gauge ring saturates at $1$ \\
@@ -572,13 +545,13 @@ Forecast:
 \]
 
 80\% CI: the Monte Carlo terminal quantiles for this scenario are
-$[\,0.30,\ 0.75\,]$ - asymmetric, with the lower edge resting at $\unow =
-0.30$ (with $\sigma_F$ this large, $\rpost \approx 1.05$ rate standard
-deviations from $0$, so $\approx 15\%$ of rectified draws sit at exactly $0$
-and further low draws barely move) and a longer reach upward. Display:
-``Projected 49\% by reset (80\% CI: 30\%--75\%)''. For comparison the retired
-v1.x symmetric $z$-quantile was $0.490 \pm 1.282 \cdot 0.200 = [0.23,\,
-0.75]$, clipped up to $\unow = 0.30$ on the left; v2.x produces the floor and
+$[\,0.30,\ 0.78\,]$ - asymmetric, with the lower edge resting at $\unow =
+0.30$ (with $\sigma_F$ this large the Gamma rate has shape
+$\rpost^2/\max(\taupostsq,\bar\tau^2) \approx 1.1$, so a sizeable share of
+draws are near-zero and those paths barely move) and a longer reach upward.
+Display: ``Projected 49\% by reset (80\% CI: 30\%--78\%)''. For comparison the
+retired v1.x symmetric $z$-quantile was $0.490 \pm 1.282 \cdot 0.200 = [0.23,\,
+0.75]$, clipped up to $\unow = 0.30$ on the left; v2.0 produces the floor and
 the right-skew directly from the monotone process.
 
 Rate uncertainty dominates path noise by $4.3\times$. The recent slope is
@@ -596,13 +569,11 @@ trajectories.
   \item \textbf{Heavy-tailed / bursty usage.} v2.0's Gamma process fixes the
     monotonicity and the lower-tail floor and adds a right skew, but its tail
     is still relatively light and its index of dispersion is tied to one
-    scalar. v2.2's rectified rate adds an explicit mass at ``no further
-    growth'' at the whole-path level, but within a growing path the increments
-    remain Gamma. If the MC CI still undercovers in the right tail (check the
+    scalar. If the MC CI still undercovers in the right tail (check the
     \texttt{UnderspreadX} and per-horizon coverage diagnostics on real
     replays), the upgrades are a heavier subordinator (inverse Gaussian) or a
-    compound-Poisson increment that models idle-then-burst usage
-    step-by-step.
+    compound-Poisson increment that models idle-then-burst usage with an
+    explicit mass at ``no further growth''.
   \item \textbf{Constant-rate assumption.} A mode shift within the window
     (deep work $\to$ meetings) breaks (A1). The recency window $\taurecent$
     absorbs slow drift but not abrupt shifts. The principled upgrade is a
