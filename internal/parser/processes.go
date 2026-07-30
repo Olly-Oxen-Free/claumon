@@ -68,7 +68,7 @@ func DiscoverPIDFiles(claudeDir string) []PIDInfo {
 		// Enrich with session title/project from JSONL
 		if info.SessionID != "" {
 			if path := FindSessionFile(claudeDir, info.SessionID); path != "" {
-				if s, err := ParseSessionFile(path); err == nil {
+				if s, err := parseSessionFileCached(path); err == nil {
 					info.Title = s.Title
 				}
 				// Extract project name from path: .../projects/{encoded-name}/session.jsonl

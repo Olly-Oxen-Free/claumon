@@ -275,19 +275,54 @@ func enumerateSessionFiles(claudeDir string) ([]sessionFile, error) {
 			files = append(files, sessionFile{path: f, project: projName, modTime: info.ModTime(), size: info.Size()})
 		}
 	}
+
+	// Enumeration is the one place every discovery path passes through, so
+	// piggyback cache eviction of deleted files here.
+	summaryCache.prune(files)
+	dailyCache.prune(files)
+	hourlyCache.prune(files)
+
 	return files, nil
+}
+
+// summaryCache memoizes ParseSessionFile results. Summaries are stored by
+// value and copied out on every hit because callers mutate them (Project,
+// process-status enrichment).
+var summaryCache = newFileCache[SessionSummary]()
+
+// parseSummaryByValue adapts ParseSessionFile to the value semantics the
+// summary cache stores.
+func parseSummaryByValue(path string) (SessionSummary, error) {
+	s, err := ParseSessionFile(path)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	return *s, nil
+}
+
+// parseSessionFileCached is a cached ParseSessionFile for callers that have a
+// bare path rather than an enumeration entry. The returned summary is a copy.
+func parseSessionFileCached(path string) (SessionSummary, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	return summaryCache.get(
+		sessionFile{path: path, modTime: info.ModTime(), size: info.Size()},
+		parseSummaryByValue)
 }
 
 // parseSessionFiles parses each file and returns the non-empty summaries with project tagged.
 func parseSessionFiles(files []sessionFile) []*SessionSummary {
 	var sessions []*SessionSummary
 	for _, f := range files {
-		s, err := ParseSessionFile(f.path)
-		if err != nil || s.MessageCount == 0 {
+		val, err := summaryCache.get(f, parseSummaryByValue)
+		if err != nil || val.MessageCount == 0 {
 			continue
 		}
+		s := val // copy out of the cache before mutating
 		s.Project = f.project
-		sessions = append(sessions, s)
+		sessions = append(sessions, &s)
 	}
 	return sessions
 }
@@ -512,6 +547,46 @@ func ParseSessionFileDaily(path string) (map[string]*SessionAggregate, error) {
 	return buckets, nil
 }
 
+// hourlyCache memoizes parseSessionFileHourly results.
+var hourlyCache = newFileCache[map[string][24]int]()
+
+// parseSessionFileHourly buckets a session's assistant token totals (input +
+// output + cache read + cache create) by local date and hour. The returned map
+// is keyed by "YYYY-MM-DD".
+func parseSessionFileHourly(path string) (map[string][24]int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening session file: %w", err)
+	}
+	defer f.Close()
+
+	buckets := map[string][24]int{}
+	scanner := newSessionScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry jsonlLine
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
+			continue
+		}
+		if entry.Timestamp.IsZero() {
+			continue
+		}
+		ts := entry.Timestamp.Local()
+		u := entry.Message.Usage
+		date := ts.Format("2006-01-02")
+		hours := buckets[date]
+		hours[ts.Hour()] += u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+		buckets[date] = hours
+	}
+	return buckets, nil
+}
+
 // HourlyTokensToday returns a 24-element slice where index i holds the total
 // tokens (input + output + cache read + cache create) from assistant messages
 // whose timestamp fell in local hour i on the current local day. Messages from
@@ -525,72 +600,20 @@ func HourlyTokensToday(claudeDir string) ([24]int, error) {
 	}
 	today := time.Now().Local().Format("2006-01-02")
 	for _, sf := range files {
-		f, err := os.Open(sf.path)
+		buckets, err := hourlyCache.get(sf, parseSessionFileHourly)
 		if err != nil {
 			continue
 		}
-		scanner := newSessionScanner(f)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-			var entry jsonlLine
-			if err := json.Unmarshal(line, &entry); err != nil {
-				continue
-			}
-			if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
-				continue
-			}
-			if entry.Timestamp.IsZero() {
-				continue
-			}
-			ts := entry.Timestamp.Local()
-			if ts.Format("2006-01-02") != today {
-				continue
-			}
-			u := entry.Message.Usage
-			hours[ts.Hour()] += u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+		for i, v := range buckets[today] {
+			hours[i] += v
 		}
-		f.Close()
 	}
 	return hours, nil
 }
 
-// dailyParseCache memoizes ParseSessionFileDaily results keyed by absolute path.
-// An entry is valid as long as the file's mtime and size are unchanged — both
-// are checked so a truncate+rewrite at the same instant still invalidates.
-// Returned bucket maps are shared with the cache; callers must treat them as
-// read-only.
-var (
-	dailyParseCacheMu sync.RWMutex
-	dailyParseCache   = map[string]dailyParseCacheEntry{}
-)
-
-type dailyParseCacheEntry struct {
-	modTime time.Time
-	size    int64
-	buckets map[string]*SessionAggregate
-}
-
-func parseSessionFileDailyCached(path string, modTime time.Time, size int64) (map[string]*SessionAggregate, error) {
-	dailyParseCacheMu.RLock()
-	e, ok := dailyParseCache[path]
-	dailyParseCacheMu.RUnlock()
-	if ok && e.size == size && e.modTime.Equal(modTime) {
-		return e.buckets, nil
-	}
-
-	buckets, err := ParseSessionFileDaily(path)
-	if err != nil {
-		return nil, err
-	}
-
-	dailyParseCacheMu.Lock()
-	dailyParseCache[path] = dailyParseCacheEntry{modTime: modTime, size: size, buckets: buckets}
-	dailyParseCacheMu.Unlock()
-	return buckets, nil
-}
+// dailyCache memoizes ParseSessionFileDaily results. Returned bucket maps are
+// shared with the cache; callers must treat them as read-only.
+var dailyCache = newFileCache[map[string]*SessionAggregate]()
 
 // DiscoverDailyAggregates walks all session files and returns aggregates
 // bucketed by message timestamp (local date). SessionCount on each entry is
@@ -609,7 +632,7 @@ func DiscoverDailyAggregates(claudeDir string) (map[string]SessionAggregate, err
 	perDay := map[string]*acc{}
 
 	for _, f := range files {
-		buckets, err := parseSessionFileDailyCached(f.path, f.modTime, f.size)
+		buckets, err := dailyCache.get(f, ParseSessionFileDaily)
 		if err != nil {
 			continue
 		}

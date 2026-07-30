@@ -1,15 +1,19 @@
-## Dashboard
+## Performance
 
-- **Weekly Fable gauge.** The dashboard now shows a dedicated gauge for the
-  Fable-only weekly limit, with utilization percentage, color-coded band, and
-  reset countdown next to the Session and Weekly gauges. Under the hood this
-  is fully dynamic: the usage API reports per-model weekly limits through a
-  new `limits` array (the legacy `seven_day_*` buckets are empty), and the
-  dashboard renders one gauge per model the API reports, so gauges for other
-  models appear automatically as their limits show up. `/api/usage` exposes
-  the data as `weekly_scoped`.
+- **Much lower CPU usage while Claude Code sessions are active.** Session
+  parsing now goes through a per-file cache validated by mtime, size, and
+  pricing version, so a session write re-parses only the file that changed
+  instead of the whole corpus. Previously the watcher recomputed the sessions
+  list and daily aggregate from scratch on every change event, which added up
+  on large session histories. Idle CPU with an active session now sits at
+  effectively zero.
 
-- **Trash explorer.** The Memory tab has a new **Trash** view listing every
-  recoverable deletion: content preview, original location, deletion time,
-  days until permanent removal, and a one-click **restore**. No more digging
-  through `~/.claude/.claumon-trash` to find where a deleted memory went.
+- **Faster `/api/today` hourly histogram.** The hourly token buckets are
+  computed per file and cached under the same scheme, instead of rescanning
+  every session file on each request.
+
+## Fixes
+
+- **Session costs stay in sync with pricing.** Cached aggregates are now
+  invalidated when the pricing table refreshes, so USD costs always reflect
+  current prices.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,8 +39,24 @@ type pricingFile struct {
 
 // Table is a concurrency-safe pricing lookup.
 type Table struct {
-	mu     sync.RWMutex
-	models map[string]ModelPricing
+	mu      sync.RWMutex
+	models  map[string]ModelPricing
+	version uint64
+}
+
+// versionCounter issues globally-unique table versions, so consumers caching
+// pricing-derived values detect staleness across both in-place refreshes and
+// whole-table swaps.
+var versionCounter uint64
+
+// Version identifies the table's current contents. It changes every time the
+// contents are replaced and is never reused by another Table. Callers that
+// cache values derived from pricing (e.g. parsed session costs) can compare
+// versions to detect staleness.
+func (t *Table) Version() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.version
 }
 
 // Get returns pricing for a model ID. The second return value is false if the model
@@ -66,6 +83,7 @@ func (t *Table) update(models map[string]ModelPricing) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.models = models
+	t.version = atomic.AddUint64(&versionCounter, 1)
 }
 
 // cachePath returns ~/.claumon/pricing.json
