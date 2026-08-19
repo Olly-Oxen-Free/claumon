@@ -475,6 +475,8 @@ tr.clickable { cursor: pointer; }
 .fl-mark.end   { color:var(--text-dim); }
 .fl-mark.agent { color:var(--purple); }
 
+.fl-zoomlabel { min-width:38px; font-family:ui-monospace,monospace; }
+
 .fl-pane {
   background:none; border:1px solid var(--border); border-radius:4px;
   color:var(--teal); font-family:ui-monospace,monospace; font-size:9.5px;
@@ -565,9 +567,21 @@ tr.clickable { cursor: pointer; }
 .tl-list { max-height:520px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; }
 
 /* Event list: indent shows who is speaking versus what they did. */
-.tl-row.d0 { padding-left:8px; }
-.tl-row.d1 { padding-left:30px; }
+/* A tool call is supporting detail, so it is set smaller and tighter than the
+   conversation it sits under. The list is scanned for the shape of the
+   exchange first and the machinery second. */
+.tl-row.d0 { padding:6px 8px 6px 8px; }
+.tl-row.d1 {
+  padding:1px 8px 1px 30px; font-size:11.5px; line-height:1.35;
+  align-items:center;
+}
 .tl-row.d1 .tl-title { font-weight:500; }
+.tl-row.d1 .tl-time { font-size:10px; }
+.tl-row.d1 .tl-detail { font-size:10.5px; }
+.tl-row.d1 .tl-dur, .tl-row.d1 .tl-cost { font-size:10.5px; }
+.tl-row.d1 .ev-ic { width:11px; height:11px; flex-basis:11px; }
+/* A row that has been opened is being read, so it gets its full size back. */
+.tl-row.d1.open { padding-top:5px; padding-bottom:5px; font-size:13px; }
 .tl-row.expandable { cursor:pointer; }
 .tl-row.expandable:hover { background:var(--bg-hover); }
 .tl-row.open { background:var(--bg-hover); }
@@ -620,7 +634,7 @@ tr.clickable { cursor: pointer; }
 .tl-row.subagent:hover { background:rgba(184,154,218,.08); }
 .tl-row.err::before { background:var(--red); }
 .tl-row.prompt::before { background:var(--ev-user); }
-.tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; }
+.tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; white-space:nowrap; }
 .tl-glyph { text-align:center; }
 .tl-title { font-weight:600; }
 .tl-detail {
@@ -3592,7 +3606,12 @@ const TL_SLOW_MS = 30000;
 function tlEventRow(e, sessionId) {
   const cls = ['tl-row', e.kind];
   if (e.is_error) cls.push('err');
-  const time = e.at ? new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+  // 24-hour: "03:53:22 AM" does not fit the time column and wrapped onto a
+  // second line, which doubled the height of every row in the list.
+  const time = e.at
+    ? new Date(e.at).toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    : '';
   const dur = fmtDur(e.duration_ms);
   const durCls = e.duration_ms >= TL_SLOW_MS ? 'tl-dur slow' : 'tl-dur';
 
@@ -3805,6 +3824,14 @@ let flExpanded = new Set();  // sessions whose agents are shown
 // the next render. Only ever set from a user action: a scroll that moves on
 // its own while you are reading is worse than one that never moves.
 let flScrollToNow = true;
+// Horizontal zoom, as a multiplier on the window's own scale. The window
+// buttons are the coarse control; this is the fine one.
+let flZoom = 1;
+const FL_ZOOM_MIN = 0.25;
+const FL_ZOOM_MAX = 16;
+// When set, flRender restores this scroll position instead of leaving it to
+// the browser — used to hold the point under the cursor still while zooming.
+let flPendingScrollLeft = null;
 
 // A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
 function flMark(id) {
@@ -3844,7 +3871,10 @@ function flRender() {
   // the same width whatever else is on screen.
   const hours = (to - from) / 3600000;
   const avail = Math.max(320, host.clientWidth - FL_LABEL_PX - 26);
-  const canvas = Math.max(avail, Math.round(hours * spec.pxPerHour));
+  // The window sets the base scale; zoom multiplies it. The fit-to-viewport
+  // floor only applies at 1x or below, so zooming in is never undone by it.
+  const scaled = Math.round(hours * spec.pxPerHour * flZoom);
+  const canvas = flZoom > 1 ? scaled : Math.max(avail, scaled);
   const x = t => ((t - from) / (to - from)) * canvas;
   const clampBar = (s, e) => {
     const x0 = Math.max(0, x(Math.max(s, from)));
@@ -3864,9 +3894,14 @@ function flRender() {
   let html = `<div class="fl-controls">
     <div class="fl-windows">${buttons}</div>
     <div class="fl-pan">
-      <button class="fl-btn" data-pan="-1">←</button>
-      <button class="fl-btn" data-pan="0">now</button>
-      <button class="fl-btn" data-pan="1">→</button>
+      <button class="fl-btn" data-pan="-1" title="pan back">←</button>
+      <button class="fl-btn" data-pan="0" title="jump to now">now</button>
+      <button class="fl-btn" data-pan="1" title="pan forward">→</button>
+    </div>
+    <div class="fl-pan">
+      <button class="fl-btn" data-zoom="out" title="zoom out (ctrl + scroll)">−</button>
+      <button class="fl-btn fl-zoomlabel" data-zoom="reset" title="reset zoom">${flZoom === 1 ? '1×' : (flZoom < 1 ? flZoom.toFixed(2) : flZoom.toFixed(1)) + '×'}</button>
+      <button class="fl-btn" data-zoom="in" title="zoom in (ctrl + scroll)">+</button>
     </div>
     <span class="fl-range">${escHtml(rangeLabel)}</span>
     <span class="fl-count">${flData.sessions.length} sessions</span>
@@ -3963,7 +3998,13 @@ function flRender() {
   // Only after a user action (first load, a window change, or "now"): a chart
   // that scrolls itself while you are reading an earlier part of the day is
   // worse than one that stays put.
-  if (flScrollToNow) {
+  const scrollerEl = host.querySelector('.fl-scroll');
+  if (flPendingScrollLeft !== null && scrollerEl) {
+    const want = flPendingScrollLeft;
+    flPendingScrollLeft = null;
+    // After layout, for the same reason the jump-to-now path defers.
+    requestAnimationFrame(() => { scrollerEl.scrollLeft = want; });
+  } else if (flScrollToNow) {
     flScrollToNow = false;
     const scroller = host.querySelector('.fl-scroll');
     if (scroller) {
@@ -3981,9 +4022,67 @@ function flRender() {
   }
 }
 
+// Applies a zoom change while holding one point on the timeline still.
+//
+// anchorClientX is the screen x the user is pointing at; without pinning it,
+// zooming walks the view sideways and you lose the thing you were looking at.
+// Passing null anchors the centre, which is what the buttons want.
+function flApplyZoom(host, factor, anchorClientX) {
+  const scroller = host.querySelector('.fl-scroll');
+  const next = Math.min(FL_ZOOM_MAX, Math.max(FL_ZOOM_MIN, flZoom * factor));
+  if (next === flZoom) return;
+
+  if (scroller) {
+    const rect = scroller.getBoundingClientRect();
+    const viewX = anchorClientX === null
+      ? rect.width / 2
+      : Math.max(0, anchorClientX - rect.left);
+    // Position within the track, past the sticky label gutter. Clamped at 0 so
+    // pointing at the label column anchors the track's left edge rather than a
+    // negative offset.
+    const trackX = Math.max(0, scroller.scrollLeft + viewX - FL_LABEL_PX);
+    const ratio = next / flZoom;
+    flPendingScrollLeft = Math.max(0, trackX * ratio + FL_LABEL_PX - viewX);
+  }
+
+  flZoom = next;
+  flRender();
+}
+
 function flBindControls(host) {
   host.querySelectorAll('.fl-btn[data-window]').forEach(b =>
-    b.addEventListener('click', () => { flWindow = b.dataset.window; flScrollToNow = true; flLoad(); }));
+    b.addEventListener('click', () => {
+      flWindow = b.dataset.window;
+      // The window is the coarse zoom; leaving a fine multiplier on top of it
+      // makes "3 days" mean something different each time it is picked.
+      flZoom = 1;
+      flScrollToNow = true;
+      flLoad();
+    }));
+
+  host.querySelectorAll('.fl-btn[data-zoom]').forEach(b =>
+    b.addEventListener('click', () => {
+      const how = b.dataset.zoom;
+      if (how === 'reset') {
+        if (flZoom === 1) return;
+        flApplyZoom(host, 1 / flZoom, null);
+        return;
+      }
+      flApplyZoom(host, how === 'in' ? 1.6 : 1 / 1.6, null);
+    }));
+
+  // Ctrl + wheel zooms the time axis, which is also what a trackpad pinch
+  // sends. Without ctrl the wheel scrolls normally, so the chart never steals
+  // an ordinary page scroll.
+  const scroller = host.querySelector('.fl-scroll');
+  if (scroller) {
+    scroller.addEventListener('wheel', ev => {
+      if (!ev.ctrlKey) return;
+      ev.preventDefault();
+      // Wheel deltas vary wildly by device; only the direction is reliable.
+      flApplyZoom(host, ev.deltaY < 0 ? 1.25 : 1 / 1.25, ev.clientX);
+    }, { passive: false });
+  }
 
   host.querySelectorAll('.fl-btn[data-pan]').forEach(b =>
     b.addEventListener('click', () => {
