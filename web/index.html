@@ -436,39 +436,62 @@ tr.clickable { cursor: pointer; }
 }
 .backdrop.open { display: block; }
 
-/* Timeline graph */
-.tl-graph { margin-bottom:18px; }
-.tl-ctx { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
-.tl-ctx span {
-  font-size:11px; padding:2px 8px; border-radius:10px;
-  background:var(--card); border:1px solid var(--border); color:var(--text-dim);
-  font-family:ui-monospace,monospace;
+/* Fleet gantt */
+.fl-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+.fl-windows, .fl-pan { display:flex; gap:4px; }
+.fl-btn {
+  background:var(--card); color:var(--text-dim); border:1px solid var(--border);
+  border-radius:5px; padding:3px 9px; font-size:11px; cursor:pointer;
 }
-.tl-ctx span b { color:var(--text); font-weight:600; }
-.tl-lanes { position:relative; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
-.tl-lane { display:grid; grid-template-columns:150px 1fr; align-items:center; min-height:26px; }
-.tl-lane + .tl-lane { border-top:1px solid var(--border); }
-.tl-lane:hover { background:rgba(127,127,127,.05); }
-.tl-lane-name {
-  font-size:11px; padding:0 8px; color:var(--text-dim);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  border-right:1px solid var(--border); line-height:26px;
+.fl-btn:hover { color:var(--text); }
+.fl-btn.on { background:var(--accent); color:#111; border-color:var(--accent); font-weight:600; }
+.fl-range, .fl-count { font-size:11px; color:var(--text-dim); font-family:ui-monospace,monospace; }
+.fl-count { margin-left:auto; }
+
+/* Lanes are positioned as percentages of the window, so the chart always
+   fits its container and the right edge is always the end of the window.
+   An earlier pixel-canvas version scrolled horizontally and opened at the
+   wrong end, hiding the newest sessions — the rows people look at first. */
+.fl-scroll {
+  overflow-y:auto; max-height:460px;
+  border:1px solid var(--border); border-radius:6px; background:var(--card);
 }
-.tl-lane-name.agent { color:#a78bfa; cursor:pointer; }
-.tl-lane-name.more { font-style:italic; }
-.tl-track { position:relative; height:26px; }
-.tl-bar {
-  position:absolute; top:7px; height:12px; border-radius:2px;
-  background:var(--accent); opacity:.85; cursor:pointer; min-width:2px;
+.fl-canvas { width:100%; }
+.fl-row { display:flex; align-items:center; height:24px; }
+.fl-row + .fl-row { border-top:1px solid var(--border); }
+.fl-row:hover { background:rgba(127,127,127,.06); }
+.fl-label {
+  position:sticky; left:0; z-index:2; flex:0 0 190px; width:190px;
+  display:flex; gap:6px; align-items:baseline; padding:0 8px; height:24px; line-height:24px;
+  background:var(--card); border-right:1px solid var(--border);
+  font-size:11px; cursor:pointer; overflow:hidden;
 }
-.tl-bar:hover { opacity:1; outline:1px solid var(--text); }
-.tl-bar.msg { background:var(--text-dim); opacity:.5; top:11px; height:4px; }
-.tl-bar.err { background:var(--danger, #f87171); }
-.tl-bar.sub { background:#a78bfa; }
-.tl-break { position:absolute; top:0; bottom:0; width:14px; background:repeating-linear-gradient(
-  115deg, transparent 0 3px, var(--border) 3px 4px); opacity:.9; }
-.tl-axis { position:relative; height:16px; margin-left:150px; }
-.tl-axis span { position:absolute; font-size:10px; color:var(--text-dim); transform:translateX(-50%); white-space:nowrap; }
+.fl-row:hover .fl-label { background:var(--bg, var(--card)); }
+.fl-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fl-when { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:10px; margin-left:auto; }
+.fl-label.agent { padding-left:22px; }
+.fl-label.agent .fl-name { color:#a78bfa; }
+.fl-track { position:relative; height:24px; flex:1 1 auto; overflow:hidden; }
+.fl-tick { display:none; }
+.fl-grid { position:absolute; top:0; bottom:0; width:1px; background:var(--border); opacity:.5; }
+.fl-now { position:absolute; top:0; bottom:0; width:1px; background:#4ade80; opacity:.8; }
+.fl-bar {
+  position:absolute; top:6px; height:12px; border-radius:3px; cursor:pointer;
+  background:var(--accent); opacity:.85; min-width:3px;
+}
+.fl-bar:hover { opacity:1; outline:1px solid var(--text); }
+.fl-bar.agent { background:#a78bfa; top:8px; height:8px; }
+.fl-bar.live { background:#4ade80; }
+
+/* The ruler is its own row so labels are not repeated per lane. */
+.fl-ruler { display:flex; align-items:center; height:18px; border-bottom:1px solid var(--border); }
+.fl-ruler .fl-label { background:var(--card); height:18px; line-height:18px; cursor:default; }
+.fl-ruler .fl-track { height:18px; }
+.fl-ruler .fl-tick {
+  display:block; position:absolute; top:2px; font-size:10px; color:var(--text-dim);
+  transform:translateX(-50%); white-space:nowrap;
+}
+
 .tl-tip {
   position:fixed; z-index:60; pointer-events:none; display:none;
   background:var(--card); border:1px solid var(--border); border-radius:6px;
@@ -3385,13 +3408,10 @@ function tlLoad(sessionId) {
     .then(tl => {
       tlRenderTotals(tl.totals);
       tlRenderEvents(tl, sessionId);
-      tlRenderGraph(tl);
       tlRenderLive(sessionId);
     })
     .catch(() => {
       document.getElementById('tl-totals').innerHTML = '';
-      document.getElementById('tl-graph').innerHTML = '';
-      tlCurrent = null;
       list.innerHTML = '<div class="tl-empty">No transcript for that session.</div>';
     });
 }
@@ -3508,286 +3528,281 @@ document.getElementById('tl-session').addEventListener('change', e => tlLoad(e.t
 function tlActivate() {
   if (tlLoaded) return;
   tlLoaded = true;
+  flLoad();
   tlLoadSessions();
 }
 
 
-// --- Timeline graph -------------------------------------------------------
-// A lane per thread: the session on top, then one per subagent it spawned.
-// Bars are placed on a shared time axis, so parallel agents visibly overlap
-// and a slow step is visibly slow.
+// --- Fleet gantt ----------------------------------------------------------
+// What was running, when. One row per Claude session, wherever it ran, with
+// the agents it spawned nested beneath it — each placed at the moment it was
+// spawned and drawn for as long as it stayed active.
 //
-// The axis is piecewise linear, not linear. A resumed session can span weeks
-// while holding a few hours of actual work, and a true linear axis renders all
-// of it as unreadable slivers. Idle gaps past a threshold collapse to a fixed
-// hatched break instead, so durations stay comparable inside each burst of
-// work while the whole session still fits on screen.
+// The unit is the session, not the project directory. A general workspace
+// hosts dozens of unrelated sessions, so grouping by directory buries them.
+//
+// The axis is real wall-clock time across a chosen window, drawn at a fixed
+// scale and scrolled horizontally. An earlier version compressed idle gaps to
+// fit one session on screen; that made every chart a different scale and
+// nothing comparable to anything else.
 
-// A gap longer than this collapses. Below it, time runs linearly, so the
-// ordinary pauses between tool calls keep their real proportions.
-const TL_GAP_MS = 5 * 60 * 1000;
-// Width given to a collapsed gap.
-const TL_BREAK_PX = 14;
-// The graph's drawing area, minus the lane-name gutter.
-const TL_GUTTER_PX = 150;
-// Agent lanes shown before collapsing the rest behind a toggle. A session that
-// fans out to dozens of agents would otherwise push the event list off screen.
-const TL_LANE_CAP = 12;
+// tick is the spacing of ruler labels for each window.
+const FL_WINDOWS = [
+  { key: '1h', label: '1 hour',  tick: 10 * 60 * 1000 },
+  { key: '3h', label: '3 hours', tick: 30 * 60 * 1000 },
+  { key: '1d', label: '1 day',   tick: 3600 * 1000 * 3 },
+  { key: '3d', label: '3 days',  tick: 3600 * 1000 * 12 },
+  { key: '1w', label: '1 week',  tick: 3600 * 1000 * 24 },
+];
 
-let tlShowAllLanes = false;
+const FL_LABEL_PX = 190;
 
-let tlCurrent = null;   // the timeline being displayed
-let tlScale = null;     // active time -> x mapping
+let flWindow = '1d';
+let flEnd = null;            // null means "now", refreshed on each render
+let flData = null;
+let flExpanded = new Set();  // sessions whose agents are shown
 
-// buildScale merges the intervals into runs of activity and lays them out,
-// collapsing the gaps between runs.
-function tlBuildScale(intervals, width) {
-  const spans = intervals
-    .filter(iv => isFinite(iv[0]) && isFinite(iv[1]))
-    .map(iv => [iv[0], Math.max(iv[1], iv[0])])
-    .sort((a, b) => a[0] - b[0]);
-  if (!spans.length) return null;
-
-  const merged = [spans[0].slice()];
-  for (const [s, e] of spans.slice(1)) {
-    const last = merged[merged.length - 1];
-    if (s - last[1] <= TL_GAP_MS) last[1] = Math.max(last[1], e);
-    else merged.push([s, e]);
-  }
-
-  const breaks = merged.length - 1;
-  const active = merged.reduce((sum, [s, e]) => sum + (e - s), 0) || 1;
-  const usable = Math.max(40, width - breaks * TL_BREAK_PX);
-  const pxPerMs = usable / active;
-
-  const segs = [];
-  let x = 0;
-  merged.forEach(([s, e], i) => {
-    const w = (e - s) * pxPerMs;
-    segs.push({ t0: s, t1: e, x0: x, x1: x + w });
-    x += w;
-    if (i < merged.length - 1) {
-      segs.push({ breakAt: x, t0: e, t1: merged[i + 1][0] });
-      x += TL_BREAK_PX;
-    }
-  });
-
-  return {
-    width: x,
-    segs,
-    breaks: segs.filter(sg => sg.breakAt !== undefined).map(sg => sg.breakAt),
-    // map clamps outside the known runs: a timestamp in a collapsed gap
-    // belongs at the edge of the gap, not somewhere inside it.
-    map(t) {
-      const real = segs.filter(sg => sg.breakAt === undefined);
-      if (t <= real[0].t0) return real[0].x0;
-      for (const sg of real) {
-        if (t >= sg.t0 && t <= sg.t1) {
-          const span = sg.t1 - sg.t0;
-          return span === 0 ? sg.x0 : sg.x0 + ((t - sg.t0) / span) * (sg.x1 - sg.x0);
-        }
-        if (t < sg.t0) return sg.x0;
-      }
-      return real[real.length - 1].x1;
-    },
-  };
+function flSpec() {
+  return FL_WINDOWS.find(w => w.key === flWindow) || FL_WINDOWS[2];
 }
 
-// tlLanes splits a timeline into the session's own events and one lane per
-// spawned agent.
-function tlLanes(tl) {
-  const own = [];
-  const agents = [];
-  for (const e of tl.events) {
-    if (e.kind === 'subagent' && e.agent) agents.push(e);
-    else own.push(e);
-  }
-  agents.sort((a, b) => new Date(a.at) - new Date(b.at));
-  return { own, agents };
-}
-
-// Every event contributes its own span; an agent contributes its full run.
-function tlEventSpan(e) {
-  const t0 = new Date(e.at).getTime();
-  let t1 = t0 + (e.duration_ms || 0);
-  if (e.kind === 'subagent' && e.agent && e.agent.ended_at) {
-    t1 = Math.max(t1, new Date(e.agent.ended_at).getTime());
-  }
-  return [t0, t1];
-}
-
-function tlBarClass(e) {
-  if (e.kind === 'subagent') return 'tl-bar sub';
-  if (e.is_error) return 'tl-bar err';
-  if (e.kind === 'tool') return 'tl-bar';
-  return 'tl-bar msg';
-}
-
-function tlRenderGraph(tl) {
-  tlCurrent = tl;
+function flLoad() {
   const host = document.getElementById('tl-graph');
-  if (!tl.events || !tl.events.length) { host.innerHTML = ''; return; }
+  const params = new URLSearchParams({ window: flWindow });
+  if (flEnd) params.set('end', new Date(flEnd).toISOString());
 
-  // Cumulative cost in time order, so hovering answers "what had this cost by
-  // now" rather than only what the step itself cost.
-  const ordered = tl.events.slice().sort((a, b) => new Date(a.at) - new Date(b.at));
-  let running = 0;
-  const cumulative = new Map();
-  for (const e of ordered) {
-    running += (e.cost_usd || 0) + (e.kind === 'subagent' && e.agent ? e.agent.cost_usd || 0 : 0);
-    cumulative.set(e.seq, running);
-  }
+  fetch('/api/fleet?' + params.toString())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .catch(err => {
+      host.innerHTML = `<div class="tl-empty">Could not load the session map (${escHtml(String(err.message || err))}).</div>`;
+      return null;
+    })
+    // Rendering is deliberately outside the fetch chain: folding it in made a
+    // render bug indistinguishable from a network failure, and reported the
+    // wrong cause for twenty minutes.
+    .then(d => { if (!d) return; flData = d; flRender(); });
+}
 
-  const { own, agents } = tlLanes(tl);
-  // A hidden tab measures zero; wait for layout rather than drawing the whole
-  // session into a 320px fallback.
-  if (host.clientWidth === 0) {
-    requestAnimationFrame(() => tlRenderGraph(tl));
-    return;
-  }
-  const width = Math.max(320, host.clientWidth - TL_GUTTER_PX - 2);
-  tlScale = tlBuildScale(tl.events.map(tlEventSpan), width);
-  if (!tlScale) { host.innerHTML = ''; return; }
+function flRender() {
+  const host = document.getElementById('tl-graph');
+  if (!flData) return;
 
-  const t0 = new Date(tl.started_at).getTime();
-  const bar = (e) => {
-    const [s, en] = tlEventSpan(e);
-    const x = tlScale.map(s);
-    const w = Math.max(2, tlScale.map(en) - x);
-    return `<div class="${tlBarClass(e)}" style="left:${x}px;width:${w}px" data-seq="${e.seq}"></div>`;
+  const spec = flSpec();
+  const from = new Date(flData.from).getTime();
+  const to = new Date(flData.to).getTime();
+  // Position as a percentage of the window rather than in pixels: the chart
+  // then fits any container, the right edge is always the end of the window,
+  // and there is no scroll position to get wrong.
+  const x = t => ((t - from) / (to - from)) * 100;
+  const clampBar = (s, e) => {
+    const x0 = Math.max(0, x(Math.max(s, from)));
+    const x1 = Math.min(100, x(Math.min(e || s, to)));
+    // The visible floor is CSS min-width on .fl-bar rather than a percentage:
+    // a two-second session in a week-wide window rounds to ~0% and would
+    // disappear, and what "big enough to see" means is a pixel question.
+    return [x0, Math.max(0, x1 - x0)];
   };
-  const breaks = tlScale.breaks
-    .map(x => `<div class="tl-break" style="left:${x}px"></div>`).join('');
 
-  const laneRow = (name, cls, body, attrs) =>
-    `<div class="tl-lane"><div class="tl-lane-name ${cls}"${attrs || ''} title="${escHtml(name)}">${escHtml(name)}</div>` +
-    `<div class="tl-track">${breaks}${body}</div></div>`;
+  // Controls: window choice, and panning so the view is not stuck on "now".
+  const buttons = FL_WINDOWS.map(w =>
+    `<button class="fl-btn${w.key === flWindow ? ' on' : ''}" data-window="${w.key}">${w.label}</button>`
+  ).join('');
+  const rangeLabel = new Date(from).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
+    ' → ' + new Date(to).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  let html = '';
-  const ctx = [];
-  if (tl.repo) ctx.push(`<span>repo <b>${escHtml(tl.repo)}</b></span>`);
-  if (tl.git_branch) ctx.push(`<span>branch <b>${escHtml(tl.git_branch)}</b></span>`);
-  if (tl.model) ctx.push(`<span>model <b>${escHtml(shortModel(tl.model))}</b></span>`);
-  ctx.push(`<span>span <b>${escHtml(fmtDur(new Date(tl.ended_at) - new Date(tl.started_at)) || '—')}</b></span>`);
-  if (tl.cwd) ctx.push(`<span title="${escHtml(tl.cwd)}">tree <b>${escHtml(tl.cwd)}</b></span>`);
-  html += `<div class="tl-ctx">${ctx.join('')}</div>`;
+  let html = `<div class="fl-controls">
+    <div class="fl-windows">${buttons}</div>
+    <div class="fl-pan">
+      <button class="fl-btn" data-pan="-1">←</button>
+      <button class="fl-btn" data-pan="0">now</button>
+      <button class="fl-btn" data-pan="1">→</button>
+    </div>
+    <span class="fl-range">${escHtml(rangeLabel)}</span>
+    <span class="fl-count">${flData.sessions.length} sessions</span>
+  </div>`;
 
-  html += '<div class="tl-lanes">';
-  html += laneRow('session', '', own.map(bar).join(''));
+  // Time ruler.
+  let ticks = '';
+  const step = spec.tick;
+  for (let t = Math.ceil(from / step) * step; t <= to; t += step) {
+    const d = new Date(t);
+    const label = step >= 86400000
+      ? d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    ticks += `<span class="fl-tick" style="left:${x(t)}%">${escHtml(label)}</span>`;
+    ticks += `<i class="fl-grid" style="left:${x(t)}%"></i>`;
+  }
+  // "Now" only exists inside the window when the view has not been panned back.
+  const now = Date.now();
+  const nowMark = now >= from && now <= to ? `<i class="fl-now" style="left:${x(now)}%"></i>` : '';
 
-  const shown = tlShowAllLanes ? agents : agents.slice(0, TL_LANE_CAP);
-  for (const a of shown) {
-    const label = (a.agent.agent_type || 'subagent') + (a.agent.tool_calls ? ` · ${a.agent.tool_calls}` : '');
-    html += laneRow(label, 'agent', bar(a), ` data-agent="${escHtml(a.agent.agent_id)}"`);
+  const rows = [];
+  for (const s of flData.sessions) {
+    const st = new Date(s.started_at).getTime();
+    const en = new Date(s.ended_at).getTime();
+    const [bx, bw] = clampBar(st, en);
+    const open = flExpanded.has(s.session_id);
+    const agents = s.agents || [];
+
+    const caret = agents.length ? (open ? '▾ ' : '▸ ') : '';
+    const label = `${caret}${s.repo || 'unknown'}${agents.length ? ` · ${agents.length}` : ''}`;
+    const meta = new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}" data-session="${escHtml(s.session_id)}">
+      <div class="fl-label" title="${escHtml((s.title || s.cwd || ''))}">
+        <span class="fl-name">${escHtml(label)}</span><span class="fl-when">${escHtml(meta)}</span>
+      </div>
+      <div class="fl-track">${ticks}${nowMark}
+        <div class="fl-bar session${s.is_running ? ' live' : ''}"
+             style="left:${bx}%;width:${bw}%" data-session="${escHtml(s.session_id)}"></div>
+      </div>
+    </div>`);
+
+    if (!open) continue;
+    for (const a of agents) {
+      const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
+      rows.push(`<div class="fl-row agent" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
+        <div class="fl-label agent" title="${escHtml(a.description || '')}">
+          <span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span>
+        </div>
+        <div class="fl-track">${ticks}${nowMark}
+          <div class="fl-bar agent" style="left:${ax}%;width:${aw}%"
+               data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"></div>
+        </div>
+      </div>`);
+    }
   }
 
-  const hidden = agents.length - shown.length;
-  if (hidden > 0 || tlShowAllLanes) {
-    // The hidden agents still belong on the chart, so their bars are drawn on
-    // one shared lane: the fan-out stays visible without 60 rows of gutter.
-    const rest = agents.slice(shown.length);
-    const label = tlShowAllLanes ? 'show fewer' : `+${hidden} more agents`;
-    html += laneRow(label, 'agent more', rest.map(bar).join(''), ' data-lanes-toggle="1"');
-  }
-  html += '</div>';
-
-  // Axis labels at each run's start, which is where the eye lands after a
-  // break. Runs can be seconds apart, so a label is dropped unless it clears
-  // the previous one — overlapping timestamps are worse than fewer of them.
-  const MIN_LABEL_GAP_PX = 110;
-  let lastLabelX = -Infinity;
-  const ticks = tlScale.segs.filter(sg => sg.breakAt === undefined).map((sg, i, all) => {
-    const isLast = i === all.length - 1;
-    // The last run gets a label only if it clears the previous one too: a
-    // right-edge label overlapping its neighbour is the same defect.
-    if (sg.x0 - lastLabelX < MIN_LABEL_GAP_PX && i > 0) return '';
-    // Keep the final label inside the plot rather than half off the edge.
-    const shift = isLast ? 'transform:translateX(-100%)' : '';
-    lastLabelX = sg.x0;
-    return `<span style="left:${sg.x0}px;${shift}">${new Date(sg.t0).toLocaleString([], {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
-  }).join('');
-  html += `<div class="tl-axis">${ticks}</div>`;
-
+  const ruler = `<div class="fl-ruler"><div class="fl-label"></div>` +
+    `<div class="fl-track">${ticks}</div></div>`;
+  html += rows.length
+    ? `<div class="fl-scroll"><div class="fl-canvas">${ruler}${rows.join('')}</div></div>`
+    : '<div class="tl-empty">No sessions in this window.</div>';
   host.innerHTML = html;
 
-  // Hover detail. One delegated listener rather than one per bar: a busy
-  // session has hundreds.
+  flBindControls(host);
+  flBindRows(host);
+
+  // Open at the right-hand edge. The window ends at "now" and sessions are
+  // listed newest first, so a left-aligned scroll hides exactly the rows the
+  // eye goes to first.
+  // Open at the right-hand edge. The window ends at "now" and sessions are
+  // listed newest first, so a left-aligned scroll hides exactly the rows the
+  // eye goes to first.
+  //
+  // Retried rather than set once: scrollLeft against freshly written innerHTML
+  // is silently dropped until the element has been laid out, and a single
+  // rAF is not reliably late enough.
+}
+
+function flBindControls(host) {
+  host.querySelectorAll('.fl-btn[data-window]').forEach(b =>
+    b.addEventListener('click', () => { flWindow = b.dataset.window; flLoad(); }));
+
+  host.querySelectorAll('.fl-btn[data-pan]').forEach(b =>
+    b.addEventListener('click', () => {
+      const dir = Number(b.dataset.pan);
+      if (dir === 0) { flEnd = null; flLoad(); return; }
+      const span = new Date(flData.to) - new Date(flData.from);
+      // Half a window per step, so context carries across the move.
+      flEnd = (flEnd || Date.now()) + dir * span / 2;
+      if (flEnd > Date.now()) flEnd = null;
+      flLoad();
+    }));
+}
+
+function flBindRows(host) {
   const tip = document.getElementById('tl-tip');
-  host.querySelectorAll('.tl-bar').forEach(el => {
+
+  host.querySelectorAll('.fl-label').forEach(el => {
+    const row = el.closest('.fl-row');
+    el.addEventListener('click', () => {
+      // A session label toggles its agents; an agent label opens that agent.
+      if (row.classList.contains('agent')) {
+        flOpenAgent(row.dataset.session, row.dataset.agent);
+        return;
+      }
+      const id = row.dataset.session;
+      if (flExpanded.has(id)) flExpanded.delete(id); else flExpanded.add(id);
+      flRender();
+    });
+  });
+
+  host.querySelectorAll('.fl-bar').forEach(el => {
+    // A bar opens the detail below: the chart says when, the list says what.
+    el.addEventListener('click', () => {
+      if (el.dataset.agent) flOpenAgent(el.dataset.session, el.dataset.agent);
+      else flSelectSession(el.dataset.session);
+    });
     el.addEventListener('mouseenter', ev => {
-      const e = tl.events.find(x => x.seq === Number(el.dataset.seq));
-      if (!e) return;
-      tip.innerHTML = tlTipHtml(tl, e, t0, cumulative.get(e.seq) || 0);
+      const s = flData.sessions.find(x => x.session_id === el.dataset.session);
+      if (!s) return;
+      const a = el.dataset.agent && (s.agents || []).find(y => y.agent_id === el.dataset.agent);
+      tip.innerHTML = flTipHtml(s, a || null);
       tip.style.display = 'block';
       tlPlaceTip(ev);
     });
     el.addEventListener('mousemove', tlPlaceTip);
     el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
   });
-
-  // Clicking an agent lane opens that agent's events in the list below;
-  // clicking the overflow lane expands the rest.
-  host.querySelectorAll('.tl-lane-name.agent').forEach(el => {
-    el.addEventListener('click', () => {
-      if (el.dataset.lanesToggle) {
-        tlShowAllLanes = !tlShowAllLanes;
-        tlRenderGraph(tl);
-        return;
-      }
-      const row = document.querySelector(`.tl-row.subagent[data-agent="${el.dataset.agent}"]`);
-      if (row) { row.click(); row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
-    });
-  });
 }
 
-function tlPlaceTip(ev) {
-  const tip = document.getElementById('tl-tip');
-  const pad = 14;
-  let x = ev.clientX + pad;
-  let y = ev.clientY + pad;
-  const r = tip.getBoundingClientRect();
-  if (x + r.width > window.innerWidth) x = ev.clientX - r.width - pad;
-  if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
-  tip.style.left = Math.max(4, x) + 'px';
-  tip.style.top = Math.max(4, y) + 'px';
+// flSelectSession drives the detail list below the chart.
+function flSelectSession(sessionId) {
+  const sel = document.getElementById('tl-session');
+  if (sel && [...sel.options].some(o => o.value === sessionId)) sel.value = sessionId;
+  tlLoad(sessionId);
 }
 
-function tlTipHtml(tl, e, sessionStart, costSoFar) {
-  const agent = e.kind === 'subagent' ? e.agent : null;
-  const elapsed = new Date(e.at).getTime() - sessionStart;
+function flOpenAgent(sessionId, agentId) {
+  flSelectSession(sessionId);
+  // The list renders asynchronously; open the agent once its row exists.
+  const tryOpen = (tries) => {
+    const row = document.querySelector(`.tl-row.subagent[data-agent="${agentId}"]`);
+    if (row) { row.click(); row.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+    if (tries > 0) setTimeout(() => tryOpen(tries - 1), 120);
+  };
+  setTimeout(() => tryOpen(20), 200);
+}
+
+function flTipHtml(s, agent) {
+  const start = new Date(agent ? agent.started_at : s.started_at);
+  const end = new Date(agent ? agent.ended_at : s.ended_at);
   const rows = [];
 
-  rows.push(['repo', tl.repo || '—']);
-  rows.push(['tree', tl.cwd || '—']);
-  if (tl.git_branch) rows.push(['branch', tl.git_branch]);
+  rows.push(['repo', s.repo || '—']);
+  if (s.cwd) rows.push(['tree', s.cwd]);
+  if (s.git_branch) rows.push(['branch', s.git_branch]);
   rows.push(['agent', agent ? (agent.agent_type || 'subagent') : 'session']);
-  rows.push(['model', shortModel((agent && agent.model) || e.model || tl.model || '—')]);
-  // How far into the session this step happened, which is the question
-  // "length of run at this point" is really asking.
-  rows.push(['elapsed', fmtDur(elapsed) || '0s']);
-  if (e.duration_ms) rows.push(['ran', fmtDur(e.duration_ms)]);
-  if (agent) rows.push(['agent cost', '$' + (agent.cost_usd || 0).toFixed(2)]);
-  else if (e.cost_usd) rows.push(['step cost', fmtCostSmall(e.cost_usd)]);
-  rows.push(['cost so far', '$' + costSoFar.toFixed(2)]);
-  if (e.is_error) rows.push(['result', 'error']);
+  if (!agent && s.model) rows.push(['model', shortModel(s.model)]);
+  rows.push(['started', start.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })]);
+  rows.push(['ran for', fmtDur(end - start) || '—']);
+  if (agent) {
+    if (agent.spawn_depth) rows.push(['depth', agent.spawn_depth]);
+    // Spawn offset answers "how far into the session did this start", which is
+    // what a nested bar's position is showing.
+    rows.push(['spawned at', fmtDur(start - new Date(s.started_at)) + ' in']);
+  } else {
+    rows.push(['cost', '$' + (s.cost_usd || 0).toFixed(2)]);
+    rows.push(['messages', s.messages || 0]);
+    rows.push(['agents', (s.agents || []).length]);
+    if (s.is_running) rows.push(['status', 'running']);
+  }
 
-  const title = agent ? (agent.agent_type || 'subagent') : (e.title || e.kind);
-  const detail = agent ? (agent.description || '') : (e.detail || '');
-
+  const title = agent ? (agent.agent_type || 'subagent') : (s.repo || 'session');
+  const detail = agent ? (agent.description || '') : (s.title || s.cwd || '');
   return `<h4>${escHtml(title)}</h4>` +
     (detail ? `<div class="sub">${escHtml(detail)}</div>` : '') +
-    '<dl>' + rows.map(([k, v]) =>
-      `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+    '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
 }
 
-// The axis is laid out in pixels, so a resize has to re-derive it.
-let tlResizeTimer = null;
+let flResizeTimer = null;
 window.addEventListener('resize', () => {
-  if (!tlCurrent) return;
-  clearTimeout(tlResizeTimer);
-  tlResizeTimer = setTimeout(() => tlRenderGraph(tlCurrent), 150);
+  if (!flData) return;
+  clearTimeout(flResizeTimer);
+  flResizeTimer = setTimeout(flRender, 150);
 });
+
 
 </script>
 </body>

@@ -647,3 +647,37 @@ func (h *Handlers) HandleLimitEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"events": events, "count": len(events)})
 }
+
+// HandleFleet lists the Claude sessions that were running inside a time
+// window, each with the subagents it spawned.
+//
+// This is the "what was running, when" view: the unit is the session wherever
+// it ran, not the project directory, because one general workspace can host
+// dozens of unrelated sessions.
+func (h *Handlers) HandleFleet(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	window := timeline.ParseWindow(q.Get("window"))
+
+	// `end` lets the window be panned into the past; it defaults to now.
+	end := time.Now()
+	if v := q.Get("end"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			end = t
+		}
+	}
+	start := end.Add(-window)
+
+	limit := 500
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+			limit = n
+		}
+	}
+
+	fleet, err := timeline.BuildFleet(h.claudeDir, start, end, limit)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, fleet)
+}

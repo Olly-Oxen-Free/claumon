@@ -280,19 +280,22 @@ makes exact nesting possible: agents fold into the Task call that spawned them r
 than being matched by position. An agent whose meta is missing still appears, so a
 spawned agent is never silently dropped.
 
-The tab opens with a **lane chart**: the session on top, then one lane per subagent,
-all on a shared time axis, so parallel agents visibly overlap and a slow step is
-visibly slow. Hovering any bar gives the repo, working tree, branch, agent type,
-model, how far into the session the step happened, how long it ran, and the running
-cost to that point.
+The tab opens with a **session map**: every Claude session that was running inside a
+chosen window — 1 hour, 3 hours, 1 day, 3 days, or 1 week — as a row, with the agents
+it spawned nested beneath it, each placed at the moment it was spawned and drawn for
+as long as it stayed active. Hovering gives repo, working tree, branch, agent type,
+model, start, duration, cost and message count.
 
-The axis is piecewise linear rather than linear. A resumed session can span weeks
-while containing a few hours of actual work; on a true linear axis all of it renders
-as unreadable slivers. Idle gaps past five minutes collapse to a hatched break, so
-durations stay comparable inside each burst of work while the whole session still
-fits. Sessions that fan out to dozens of agents show the first twelve lanes and draw
-the rest on one shared overflow lane, expandable — the fan-out stays visible without
-sixty rows of gutter pushing the event list off screen.
+The unit is the session, not the project directory. A general workspace hosts dozens
+of unrelated sessions, and grouping by directory buries them.
+
+Positions are percentages of the window rather than pixels on a scrolling canvas, so
+the chart always fits its container and the right edge is always the end of the
+window. An earlier version scrolled horizontally and opened at the left, which hid
+the newest sessions — the rows the eye goes to first.
+
+Clicking a row loads that session's own event list below: the map says *when*, the
+list says *what*.
 
 Subagent rows expand in place, fetching that agent's own events on demand — a session
 can spawn dozens, and loading them all up front would make the first paint useless.
