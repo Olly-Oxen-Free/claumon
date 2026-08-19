@@ -477,6 +477,17 @@ tr.clickable { cursor: pointer; }
 }
 .fl-row.sel .fl-mark { border-width:1.5px; }
 
+/* Heat view */
+.fl-legend { display:inline-flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); }
+.fl-legend i {
+  display:inline-block; width:54px; height:8px; border-radius:4px;
+  background:linear-gradient(90deg,#1b1b2f,#3b1e6e,#8b1e5a,#d63a2f,#f2891f,#ffd400,#fff6c8);
+}
+.fl-legend b { display:none; }
+/* In heat view the colour is the message, so the selection glow is dropped —
+   it tinted the very reading it was meant to highlight. */
+.fl-row.heat.sel .fl-bar { box-shadow:none; outline:1px solid var(--text-bright); }
+
 /* Reading marker: where the event list is, projected onto the timeline. */
 .fl-read {
   position:absolute; top:0; width:0; height:0; display:none;
@@ -503,6 +514,9 @@ tr.clickable { cursor: pointer; }
 .fl-mark.start { color:var(--yellow); }
 .fl-mark.end   { color:var(--text-dim); }
 .fl-mark.agent { color:var(--purple); }
+
+.fl-forkic { width:10px; height:10px; flex-basis:10px; color:var(--teal); }
+.fl-forkic use { fill:none; stroke:currentColor; stroke-width:1.5; }
 
 .fl-clear { border-color:var(--accent); color:var(--accent); }
 .fl-clear:hover { background:rgba(218,119,86,.12); color:var(--text-bright); }
@@ -1208,6 +1222,7 @@ tr.clickable { cursor: pointer; }
   <g id="ic-msg"><path d="M2 3h12v8H6l-4 3z"/></g>
   <g id="ic-spark"><path d="M8 2l1.6 4.4L14 8l-4.4 1.6L8 14l-1.6-4.4L2 8l4.4-1.6z"/></g>
   <g id="ic-alert"><circle cx="8" cy="8" r="6"/><path d="M8 5v4M8 11h.01"/></g>
+  <g id="ic-fork"><path d="M5 2v5a3 3 0 0 0 3 3h3"/><circle cx="5" cy="2" r="1.6"/><circle cx="12" cy="10" r="1.6"/><circle cx="5" cy="13" r="1.6"/><path d="M5 10v1"/></g>
   <g id="ic-layers"><path d="M8 2 2 5l6 3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>
   <g id="ic-flag"><path d="M4 14V2h8l-2 3 2 3H4"/></g>
   <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
@@ -3923,8 +3938,91 @@ let flScale = null;
 // When set, the map shows only this session and the agents it spawned.
 // Focusing is how you stop reading twenty threads at once and read one.
 let flFocused = null;
+// Heat view: colour a bar by how fast it burned tokens rather than by what it
+// is. Off by default — it trades the "what am I looking at" reading for a
+// "where did it go" one, and only one of those can be the default.
+let flHeat = false;
 
 // A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
+// Orders sessions so children follow the session they were split from, giving
+// lineage a shape instead of leaving two related rows to be spotted by their
+// timestamps. A session whose parent is outside the window keeps its own place:
+// a partial lineage still beats hiding the row.
+function flOrderByLineage(sessions) {
+  const present = new Set(sessions.map(s => s.session_id));
+  const kids = new Map();
+  const roots = [];
+  for (const s of sessions) {
+    const parent = s.forked_from && s.forked_from.session_id;
+    if (parent && present.has(parent) && parent !== s.session_id) {
+      if (!kids.has(parent)) kids.set(parent, []);
+      kids.get(parent).push(s);
+    } else {
+      roots.push(s);
+    }
+  }
+  const out = [];
+  const seen = new Set();
+  const walk = (s, depth) => {
+    // Guard against a cycle: lineage is data from disk, not a promise.
+    if (seen.has(s.session_id)) return;
+    seen.add(s.session_id);
+    s._depth = depth;
+    out.push(s);
+    for (const k of (kids.get(s.session_id) || [])) walk(k, depth + 1);
+  };
+  for (const r of roots) walk(r, 0);
+  // Anything unreachable (a cycle, or a parent that is its own ancestor) is
+  // appended rather than dropped.
+  for (const s of sessions) if (!seen.has(s.session_id)) { s._depth = 0; out.push(s); }
+  return out;
+}
+
+// A thermal ramp: cold and dark through red and orange to white hot. Ordered
+// stops rather than an interpolation in one colour space, because the point is
+// that a hot bar is unmistakable, not that the gradient is perceptually even.
+const FL_HEAT_STOPS = [
+  [0.00, '#1b1b2f'],
+  [0.20, '#3b1e6e'],
+  [0.40, '#8b1e5a'],
+  [0.60, '#d63a2f'],
+  [0.78, '#f2891f'],
+  [0.90, '#ffd400'],
+  [1.00, '#fff6c8'],
+];
+
+function flHeatColor(t) {
+  const v = Math.max(0, Math.min(1, t));
+  for (let i = 1; i < FL_HEAT_STOPS.length; i++) {
+    const [p1, c1] = FL_HEAT_STOPS[i - 1];
+    const [p2, c2] = FL_HEAT_STOPS[i];
+    if (v <= p2) {
+      const f = p2 === p1 ? 0 : (v - p1) / (p2 - p1);
+      return flMixHex(c1, c2, f);
+    }
+  }
+  return FL_HEAT_STOPS[FL_HEAT_STOPS.length - 1][1];
+}
+
+function flMixHex(a, b, f) {
+  const pa = [1, 3, 5].map(i => parseInt(a.substr(i, 2), 16));
+  const pb = [1, 3, 5].map(i => parseInt(b.substr(i, 2), 16));
+  const mixed = pa.map((v, i) => Math.round(v + (pb[i] - v) * f));
+  return '#' + mixed.map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+// Burn rate in tokens per hour, on a log scale.
+//
+// Rates span orders of magnitude — a session reading one file versus one
+// grinding through a repo — so a linear scale puts everything at the bottom
+// and one outlier at the top.
+function flBurnFraction(s, maxRate) {
+  const hours = Math.max(1 / 60, (new Date(s.ended_at) - new Date(s.started_at)) / 3600000);
+  const rate = (s.tokens || 0) / hours;
+  if (rate <= 0 || maxRate <= 0) return 0;
+  return Math.min(1, Math.log10(1 + rate) / Math.log10(1 + maxRate));
+}
+
 function flMark(id) {
   return `<svg class="fl-markic" viewBox="0 0 16 16"><use href="#${id}"/></svg>`;
 }
@@ -3999,12 +4097,16 @@ function flRender() {
       <button class="fl-btn" data-pan="1" title="pan forward">→</button>
     </div>
     <div class="fl-pan">
+      <button class="fl-btn${flHeat ? ' on' : ''}" data-heat="1" title="colour bars by token burn rate">heat</button>
+    </div>
+    <div class="fl-pan">
       <button class="fl-btn" data-zoom="out" title="zoom out (ctrl + scroll)">−</button>
       <button class="fl-btn fl-zoomlabel" data-zoom="reset" title="reset zoom">${flZoom === 1 ? '1×' : (flZoom < 1 ? flZoom.toFixed(2) : flZoom.toFixed(1)) + '×'}</button>
       <button class="fl-btn" data-zoom="in" title="zoom in (ctrl + scroll)">+</button>
     </div>
     <span class="fl-range">${escHtml(rangeLabel)}</span>
     ${flFocused ? `<button class="fl-btn fl-clear" data-clear="1" title="show every session again">✕ focused</button>` : ''}
+    ${flHeat ? `<span class="fl-legend" title="tokens per hour, log scale"><i></i>cool<b></b>hot</span>` : ''}
     <span class="fl-count">${flFocused ? '1 of ' + flData.sessions.length : flData.sessions.length + ' sessions'}</span>
   </div>`;
 
@@ -4025,10 +4127,27 @@ function flRender() {
 
   flScale = { from, to, canvas, x };
 
+  // The hottest session in the window sets the top of the scale, so the ramp
+  // always uses its full range rather than being flattened by a fixed ceiling.
+  let maxRate = 0;
+  if (flHeat) {
+    const rates = flData.sessions.map(s => {
+      const hours = Math.max(1 / 60, (new Date(s.ended_at) - new Date(s.started_at)) / 3600000);
+      return (s.tokens || 0) / hours;
+    }).filter(r => r > 0).sort((a, b) => a - b);
+    // The 90th percentile tops the scale, not the maximum. One session burning
+    // ten times everything else would otherwise flatten every other bar to the
+    // cold end; anything above the percentile simply clamps to white hot.
+    maxRate = rates.length ? rates[Math.min(rates.length - 1, Math.floor(rates.length * 0.9))] : 0;
+  }
+
   const rows = [];
-  const visible = flFocused
+  const base = flFocused
     ? flData.sessions.filter(s => s.session_id === flFocused)
     : flData.sessions;
+  // Put a split session directly beneath the one it came from, so lineage
+  // reads as a tree instead of two unrelated rows that happen to overlap.
+  const visible = flOrderByLineage(base);
   for (const s of visible) {
     const st = new Date(s.started_at).getTime();
     const en = new Date(s.ended_at).getTime();
@@ -4038,6 +4157,10 @@ function flRender() {
 
     const caret = agents.length ? (open ? '▾ ' : '▸ ') : '';
     const label = `${caret}${s.repo || 'unknown'}${agents.length ? ` · ${agents.length}` : ''}`;
+    const forkIcon = s.forked_from
+      ? `<svg class="ev-ic fl-forkic" viewBox="0 0 16 16" title="split from another session"><use href="#ic-fork"/></svg>`
+      : '';
+    const indent = (s._depth || 0) * 12;
     // The pane badge is the herdr join made useful: it names where the session
     // is running and clicking it puts that pane in front of you.
     const meta = s.herdr
@@ -4075,13 +4198,21 @@ function flRender() {
     }
 
     const sel = s.session_id === tlSelected ? ' sel' : '';
-    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}" data-session="${escHtml(s.session_id)}">
-      <div class="fl-label" title="${escHtml((s.title || s.cwd || ''))}">
-        <span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
+    // In heat view the bar's colour carries the reading, so it is drawn
+    // thicker and fully opaque; the state colours (live, selected) would
+    // otherwise override the very thing being shown.
+    let barStyle = `left:${bx}px;width:${bw}px`;
+    if (flHeat) {
+      const frac = flBurnFraction(s, maxRate);
+      barStyle += `;background:${flHeatColor(frac)};opacity:1;height:9px;top:8px`;
+    }
+    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}" data-session="${escHtml(s.session_id)}">
+      <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml((s.title || s.cwd || ''))}">
+        ${forkIcon}<span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
       </div>
       <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
         <div class="fl-bar session${s.is_running ? ' live' : ''}"
-             style="left:${bx}px;width:${bw}px" data-session="${escHtml(s.session_id)}"></div>
+             style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>
         ${marks}
       </div>
     </div>`);
@@ -4179,6 +4310,14 @@ function flBindControls(host) {
       flScrollToNow = true;
       flLoad();
     }));
+
+  const heat = host.querySelector('.fl-btn[data-heat]');
+  if (heat) heat.addEventListener('click', () => {
+    flHeat = !flHeat;
+    const scroller = host.querySelector('.fl-scroll');
+    if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+    flRender();
+  });
 
   const clear = host.querySelector('.fl-btn[data-clear]');
   if (clear) clear.addEventListener('click', () => { flFocused = null; flRender(); });
@@ -4389,6 +4528,14 @@ function flTipHtml(s, agent) {
   rows.push(['repo', s.repo || '—']);
   if (s.cwd) rows.push(['tree', s.cwd]);
   if (s.git_branch) rows.push(['branch', s.git_branch]);
+  if (s.forked_from) {
+    const ff = s.forked_from;
+    const parent = (flData.sessions.find(x => x.session_id === ff.session_id) || {}).repo;
+    rows.push(['split from', (parent ? parent + ' · ' : '') + ff.session_id.slice(0, 8)]);
+    // Say how the lineage was established: /branch names the message, /fork
+    // leaves only a copied session id behind.
+    rows.push(['lineage', ff.inferred ? 'inferred from copied history' : 'at message ' + (ff.message_uuid || '').slice(0, 8)]);
+  }
   if (s.herdr) {
     rows.push(['pane', s.herdr.pane_id + (s.herdr.workspace_id ? ' · ' + s.herdr.workspace_id : '')]);
     if (s.herdr.status) rows.push(['herdr', s.herdr.status + (s.herdr.focused ? ' · focused' : '')]);
@@ -4404,6 +4551,11 @@ function flTipHtml(s, agent) {
     rows.push(['spawned at', fmtDur(start - new Date(s.started_at)) + ' in']);
   } else {
     rows.push(['cost', '$' + (s.cost_usd || 0).toFixed(2)]);
+    if (s.tokens) {
+      const hours = Math.max(1 / 60, (new Date(s.ended_at) - new Date(s.started_at)) / 3600000);
+      rows.push(['tokens', fmtNum(s.tokens)]);
+      rows.push(['burn', fmtNum(Math.round(s.tokens / hours)) + '/h']);
+    }
     rows.push(['messages', s.messages || 0]);
     rows.push(['agents', (s.agents || []).length]);
     if (s.is_running) rows.push(['status', 'running']);

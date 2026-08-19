@@ -48,13 +48,40 @@ type FleetSession struct {
 	EndedAt   time.Time `json:"ended_at"`
 	CostUSD   float64   `json:"cost_usd"`
 	Messages  int       `json:"messages"`
-	IsRunning bool      `json:"is_running"`
+	// Tokens is everything the session moved through the model, cache reads
+	// included. Used for the heat view, where the question is burn rate rather
+	// than billable spend.
+	Tokens    int  `json:"tokens"`
+	IsRunning bool `json:"is_running"`
 
 	Agents []FleetAgent `json:"agents,omitempty"`
 
 	// Herdr is the pane this session is running in, when the workspace
 	// manager knows about it. Absent when herdr is not running.
 	Herdr *HerdrRef `json:"herdr,omitempty"`
+
+	// ForkedFrom names the session this one was split off from, when it was.
+	ForkedFrom *ForkRef `json:"forked_from,omitempty"`
+}
+
+// ForkRef is a session's lineage.
+//
+// Claude Code records this two different ways depending on how the split was
+// made, and both are read:
+//
+//   - /branch stamps every inherited line with forkedFrom{sessionId,
+//     messageUuid}, naming the exact message the split happened at.
+//   - /fork copies the history without that stamp, but the copied lines keep
+//     the parent's `session_id` while `sessionId` is rewritten to the new one.
+//     The mismatch is the only trace, so it is treated as one.
+type ForkRef struct {
+	SessionID string `json:"session_id"`
+	// MessageUUID is the message the split was taken at. Only /branch records
+	// it; empty for a /fork.
+	MessageUUID string `json:"message_uuid,omitempty"`
+	// Inferred is true when the lineage came from the session_id mismatch
+	// rather than an explicit field, so a reader knows how firm it is.
+	Inferred bool `json:"inferred,omitempty"`
 }
 
 // HerdrRef locates a session in the terminal workspace manager, so the
@@ -127,6 +154,7 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 
 		path := parser.FindSessionFile(claudeDir, s.ID)
 		cwd, branch := s.CWD, ""
+		var forked *ForkRef
 		if path != "" {
 			if c, b, ok := sessionContext(path); ok {
 				if c != "" {
@@ -134,19 +162,21 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 				}
 				branch = b
 			}
+			forked = detectFork(path, s.ID)
 		}
 
 		fs := FleetSession{
-			SessionID: s.ID,
-			Cwd:       cwd,
-			GitBranch: branch,
-			Model:     s.Model,
-			Title:     s.Title,
-			StartedAt: start,
-			EndedAt:   end,
-			CostUSD:   s.EstimatedCostUSD,
-			Messages:  s.MessageCount,
-			IsRunning: s.IsRunning,
+			SessionID:  s.ID,
+			Cwd:        cwd,
+			GitBranch:  branch,
+			Model:      s.Model,
+			Title:      s.Title,
+			StartedAt:  start,
+			EndedAt:    end,
+			CostUSD:    s.EstimatedCostUSD,
+			Messages:   s.MessageCount,
+			IsRunning:  s.IsRunning,
+			ForkedFrom: forked,
 		}
 		if cwd != "" {
 			fs.Repo = filepath.Base(cwd)
@@ -182,6 +212,49 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 		return out.Sessions[i].StartedAt.After(out.Sessions[j].StartedAt)
 	})
 	return out, nil
+}
+
+// detectFork reads a session's lineage from the head of its transcript.
+//
+// Bounded like sessionContext: a split copies the whole history, so the trace
+// appears within the first handful of lines, and these files reach tens of
+// megabytes. Reading them in full for one field would make a week-wide view
+// unusable.
+func detectFork(path, ownID string) *ForkRef {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	var inferred *ForkRef
+	for i := 0; i < 200 && sc.Scan(); i++ {
+		var l struct {
+			SessionIDSnake string `json:"session_id"`
+			ForkedFrom     *struct {
+				SessionID   string `json:"sessionId"`
+				MessageUUID string `json:"messageUuid"`
+			} `json:"forkedFrom"`
+		}
+		if json.Unmarshal(sc.Bytes(), &l) != nil {
+			continue
+		}
+		// Explicit lineage wins and names the split point, so stop there.
+		if l.ForkedFrom != nil && l.ForkedFrom.SessionID != "" && l.ForkedFrom.SessionID != ownID {
+			return &ForkRef{
+				SessionID:   l.ForkedFrom.SessionID,
+				MessageUUID: l.ForkedFrom.MessageUUID,
+			}
+		}
+		// Otherwise remember the mismatch, but keep looking for the explicit
+		// field: a /branch also carries inherited session_ids.
+		if inferred == nil && l.SessionIDSnake != "" && l.SessionIDSnake != ownID {
+			inferred = &ForkRef{SessionID: l.SessionIDSnake, Inferred: true}
+		}
+	}
+	return inferred
 }
 
 // sessionContext reads the working tree and branch from the transcript's first
