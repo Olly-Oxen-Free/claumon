@@ -617,6 +617,11 @@ tr.clickable { cursor: pointer; }
 
 .tl-listbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .tl-listtitle { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; margin-right:4px; }
+.tl-sortdir { display:inline-flex; align-items:center; padding:3px 7px; }
+.tl-arrow { width:12px; height:12px; transition:transform .18s ease; }
+.tl-arrow use { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.tl-sortdir.up .tl-arrow { transform:rotate(180deg); }
+
 .tl-paused { font-size:11px; color:var(--yellow); display:none; margin-left:auto; }
 .tl-paused.on { display:inline; }
 .tl-list { max-height:520px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; }
@@ -1232,6 +1237,7 @@ tr.clickable { cursor: pointer; }
   <g id="ic-spark"><path d="M8 2l1.6 4.4L14 8l-4.4 1.6L8 14l-1.6-4.4L2 8l4.4-1.6z"/></g>
   <g id="ic-alert"><circle cx="8" cy="8" r="6"/><path d="M8 5v4M8 11h.01"/></g>
   <g id="ic-fork"><path d="M5 2v5a3 3 0 0 0 3 3h3"/><circle cx="5" cy="2" r="1.6"/><circle cx="12" cy="10" r="1.6"/><circle cx="5" cy="13" r="1.6"/><path d="M5 10v1"/></g>
+  <g id="ic-arrow-down"><path d="M8 3v10M4 9l4 4 4-4"/></g>
   <g id="ic-layers"><path d="M8 2 2 5l6 3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>
   <g id="ic-flag"><path d="M4 14V2h8l-2 3 2 3H4"/></g>
   <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
@@ -1411,8 +1417,9 @@ tr.clickable { cursor: pointer; }
     <div class="tl-tip" id="tl-tip"></div>
     <div class="tl-listbar">
       <span class="tl-listtitle">Events</span>
-      <button class="fl-btn on" id="tl-sort-new" data-sort="desc">Newest first</button>
-      <button class="fl-btn" id="tl-sort-old" data-sort="asc">Oldest first</button>
+      <button class="fl-btn tl-sortdir" id="tl-sortdir" title="newest first — click to reverse">
+        <svg class="tl-arrow" viewBox="0 0 16 16"><use href="#ic-arrow-down"/></svg>
+      </button>
       <span class="tl-paused" id="tl-paused">paused — scrolled away from the top</span>
     </div>
     <div class="tl-list" id="tl-list">
@@ -3224,6 +3231,22 @@ function connectSSE() {
     fetchProcesses();
   });
 
+  // The Timeline tab was polling on its own timer and never listened here,
+  // which is why it lagged behind a live session. `sessions` fires on every
+  // transcript write — the same push the server already does for the dashboard.
+  es.addEventListener('sessions', () => {
+    if (!tlLoaded) return;
+    tlRefresh();
+    flRefreshSoon();
+  });
+
+  // Emitted by this fork's live-session reader whenever hook state changes.
+  es.addEventListener('live', () => {
+    if (!tlLoaded) return;
+    if (tlSelected) tlRenderLive(tlSelected);
+    flRefreshSoon();
+  });
+
   es.addEventListener('memory_changed', e => {
     fetch('/api/memories').then(r => r.json()).then(data => {
       memoriesData = data;
@@ -3863,17 +3886,22 @@ document.getElementById('tl-list').addEventListener('click', ev => {
 
 document.getElementById('tl-session').addEventListener('change', e => flSelectSession(e.target.value));
 
-document.querySelectorAll('.tl-listbar .fl-btn').forEach(b =>
-  b.addEventListener('click', () => {
-    tlSort = b.dataset.sort;
-    document.querySelectorAll('.tl-listbar .fl-btn').forEach(x => x.classList.toggle('on', x === b));
-    if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
-    // Land at the newest end, which is the top in one order and the bottom in
-    // the other.
-    const list = document.getElementById('tl-list');
-    list.scrollTop = tlSort === 'desc' ? 0 : list.scrollHeight;
-    tlSetPausedFlag();
-  }));
+// One control, rotated to show which way time runs, instead of two buttons
+// where only the highlight said which was active.
+document.getElementById('tl-sortdir').addEventListener('click', () => {
+  tlSort = tlSort === 'desc' ? 'asc' : 'desc';
+  const btn = document.getElementById('tl-sortdir');
+  btn.classList.toggle('up', tlSort === 'asc');
+  btn.title = tlSort === 'desc' ? 'newest first — click to reverse'
+                                : 'oldest first — click to reverse';
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+  // Land at the newest end either way: the top in one order, the bottom in
+  // the other.
+  const list = document.getElementById('tl-list');
+  list.scrollTop = tlSort === 'desc' ? 0 : list.scrollHeight;
+  tlSetPausedFlag();
+  tlSyncReadMarker();
+});
 
 document.getElementById('tl-list').addEventListener('scroll', () => {
   tlSetPausedFlag();
@@ -3890,12 +3918,13 @@ function tlActivate() {
   // A live session keeps producing events; refresh on a timer, and let
   // tlRefresh decide whether the reader is in a position to accept them.
   clearInterval(tlRefreshTimer);
-  tlRefreshTimer = setInterval(tlRefresh, 4000);
+  // Push drives updates; these timers are a fallback for a dropped stream.
+  tlRefreshTimer = setInterval(tlRefresh, 15000);
   // The map tails the same activity. Slower, because a session appearing or
   // ending is a coarser event than a tool call, and each pass re-reads every
   // session summary in the window.
   clearInterval(flRefreshTimer);
-  flRefreshTimer = setInterval(flRefresh, 10000);
+  flRefreshTimer = setInterval(flRefresh, 30000);
 }
 
 
@@ -3971,10 +4000,12 @@ const FL_BAR_TOP = 10;
 const FL_BAR_H = 5;
 const FL_CURVE_W = 20;
 
-function flForkCurve(child, childBarX, clampBar) {
+function flForkCurve(child, childBarX, clampBar, colorOverride) {
   const parent = flData.sessions.find(x => x.session_id === (child.forked_from || {}).session_id);
   // The parent's own colour, so the line that bends is visibly the same line.
-  const stroke = parent && parent.is_running ? 'var(--green)' : 'var(--accent)';
+  // In heat view the join carries the parent's colour at the split, so the
+  // whole line — parent, curve, child — reads as one temperature there.
+  const stroke = colorOverride || (parent && parent.is_running ? 'var(--green)' : 'var(--accent)');
   // ...and the parent's own opacity. Drawing the join at full strength beside a
   // 45%-opacity bar made the curve read as a different, darker element joined to
   // the bar rather than as the bar continuing.
@@ -4079,6 +4110,40 @@ function flMixHex(a, b, f) {
   return '#' + mixed.map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
+// A CSS gradient across the bar, one stop per bucket of the session's own burn
+// series. Neighbouring stops interpolate, so a change in demand arrives as a
+// blend rather than a hard edge.
+function flHeatGradient(s, peak) {
+  const burn = s.burn || [];
+  if (!burn.length || peak <= 0) return flHeatColor(0);
+  const stops = burn.map((v, i) => {
+    const pct = (i / (burn.length - 1)) * 100;
+    return `${flHeatColor(flHeatFraction(v, peak))} ${pct.toFixed(1)}%`;
+  });
+  return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+
+// Where one bucket sits on the ramp. Logarithmic, because demand spans orders
+// of magnitude within a single session — a cache-heavy turn is thousands of
+// times a small edit — and a linear scale leaves all but the peak black.
+function flHeatFraction(v, peak) {
+  if (v <= 0) return 0;
+  return Math.min(1, Math.log10(1 + v) / Math.log10(1 + peak));
+}
+
+// The colour the parent was at the moment of a split, so a branch carries its
+// origin's heat instead of restarting cold.
+function flHeatAt(session, peak, when) {
+  const burn = session && session.burn;
+  if (!burn || !burn.length || peak <= 0) return null;
+  const st = new Date(session.started_at).getTime();
+  const en = new Date(session.ended_at).getTime();
+  if (!(en > st)) return flHeatColor(flHeatFraction(burn[0], peak));
+  const f = Math.max(0, Math.min(1, (when - st) / (en - st)));
+  const idx = Math.min(burn.length - 1, Math.floor(f * burn.length));
+  return flHeatColor(flHeatFraction(burn[idx], peak));
+}
+
 // Burn rate in tokens per hour, on a log scale.
 //
 // Rates span orders of magnitude — a session reading one file versus one
@@ -4102,6 +4167,15 @@ function flSpec() {
 // Reloads the map in place: same window, same scroll, same expanded rows.
 // Used by the live tick, where anything that moved the view would make the
 // chart unusable while you watch it.
+// Map refreshes are coalesced. A busy session writes its transcript several
+// times a second and each write emits `sessions`; rebuilding the map that often
+// would be wasted work and would fight the reader's scroll.
+let flRefreshPending = null;
+function flRefreshSoon() {
+  if (flRefreshPending) return;
+  flRefreshPending = setTimeout(() => { flRefreshPending = null; flRefresh(); }, 1500);
+}
+
 function flRefresh() {
   const scroller = document.querySelector('#tl-graph .fl-scroll');
   if (scroller) flPendingScrollLeft = scroller.scrollLeft;
@@ -4112,6 +4186,9 @@ function flLoad() {
   const host = document.getElementById('tl-graph');
   const params = new URLSearchParams({ window: flWindow });
   if (flEnd) params.set('end', new Date(flEnd).toISOString());
+  // The per-session token series costs a transcript read each, so it is only
+  // requested when something is going to draw it.
+  if (flHeat) params.set('burn', '1');
 
   fetch('/api/fleet?' + params.toString())
     .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
@@ -4197,16 +4274,18 @@ function flRender() {
 
   // The hottest session in the window sets the top of the scale, so the ramp
   // always uses its full range rather than being flattened by a fixed ceiling.
-  let maxRate = 0;
+  // The heat scale is set across every bucket of every session, not per
+  // session, so the same colour means the same demand wherever it appears.
+  // The 90th percentile tops it rather than the maximum: one runaway burst
+  // would otherwise flatten everything else to the cold end. Above it clamps.
+  let peak = 0;
   if (flHeat) {
-    const rates = flData.sessions.map(s => {
-      const hours = Math.max(1 / 60, (new Date(s.ended_at) - new Date(s.started_at)) / 3600000);
-      return (s.tokens || 0) / hours;
-    }).filter(r => r > 0).sort((a, b) => a - b);
-    // The 90th percentile tops the scale, not the maximum. One session burning
-    // ten times everything else would otherwise flatten every other bar to the
-    // cold end; anything above the percentile simply clamps to white hot.
-    maxRate = rates.length ? rates[Math.min(rates.length - 1, Math.floor(rates.length * 0.9))] : 0;
+    const all = [];
+    for (const s of flData.sessions) {
+      for (const v of (s.burn || [])) if (v > 0) all.push(v);
+    }
+    all.sort((a, b) => a - b);
+    peak = all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.9))] : 0;
   }
 
   const rows = [];
@@ -4269,10 +4348,12 @@ function flRender() {
     // In heat view the bar's colour carries the reading, so it is drawn
     // thicker and fully opaque; the state colours (live, selected) would
     // otherwise override the very thing being shown.
+    // Heat keeps the bars' own geometry — it is a colour reading, not a
+    // different chart, and a thicker bar in heat mode made the two views hard
+    // to compare.
     let barStyle = `left:${bx}px;width:${bw}px`;
     if (flHeat) {
-      const frac = flBurnFraction(s, maxRate);
-      barStyle += `;background:${flHeatColor(frac)};opacity:1;height:9px;top:8px`;
+      barStyle += `;background:${flHeatGradient(s, peak)};opacity:1`;
     }
     // A split session's transcript replays its parent's history with the
     // original timestamps, so its bar would otherwise span the parent's whole
@@ -4290,12 +4371,18 @@ function flRender() {
       ? new Date(s.forked_from.diverged_at).getTime() : null;
     if (dv && dv > st && dv < en) {
       const [ox, ow] = clampBar(dv, en);
-      const own = flHeat
-        ? barStyle.replace(/left:[^;]+;width:[^;]+/, `left:${ox}px;width:${ow}px`)
-        : `left:${ox}px;width:${ow}px`;
+      let own = `left:${ox}px;width:${ow}px`;
+      let forkColor = null;
+      if (flHeat) {
+        // A branch inherits the parent's heat at the moment of the split rather
+        // than starting cold, then shades along its own burn from there.
+        const parent = flData.sessions.find(p => p.session_id === s.forked_from.session_id);
+        forkColor = flHeatAt(parent, peak, dv);
+        own += `;background:${flHeatGradient(s, peak)};opacity:1`;
+      }
       bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
                    style="${own}" data-session="${escHtml(s.session_id)}"></div>`;
-      link = flForkCurve(s, ox, clampBar);
+      link = flForkCurve(s, ox, clampBar, forkColor);
     } else {
       bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
                    style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>`;

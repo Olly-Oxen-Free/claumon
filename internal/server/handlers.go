@@ -675,7 +675,10 @@ func (h *Handlers) HandleFleet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fleet, err := timeline.BuildFleet(h.claudeDir, start, end, limit)
+	// Burn series are opt-in: they cost a transcript read per session, and only
+	// the heat view needs them.
+	withBurn := q.Get("burn") == "1"
+	fleet, err := timeline.BuildFleet(h.claudeDir, start, end, limit, withBurn)
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		return

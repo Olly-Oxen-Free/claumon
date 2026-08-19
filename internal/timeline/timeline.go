@@ -41,6 +41,14 @@ const (
 	KindTool Kind = "tool"
 	// KindSubagent is a Task call, joined to the agent it spawned.
 	KindSubagent Kind = "subagent"
+	// KindThinking is a model response that reasoned before acting.
+	//
+	// The reasoning itself is not recoverable: Claude Code writes thinking
+	// blocks with an empty body and a signature only, so the text shown live in
+	// the terminal is never persisted. What this event gives is the structure —
+	// a parent for the tool calls that came out of that turn, which otherwise
+	// sit in the list with nothing above them.
+	KindThinking Kind = "thinking"
 	// KindCompact is a context compaction: the point where the conversation
 	// was summarised and most of its history dropped. Worth marking, because
 	// everything before it is no longer in the model's context, and a session
@@ -77,6 +85,10 @@ type Event struct {
 	CacheCreate int     `json:"cache_create,omitempty"`
 	CostUSD     float64 `json:"cost_usd,omitempty"`
 
+	// Thoughts is how many thinking blocks the response carried. Set on
+	// KindThinking and on a KindMessage that also reasoned.
+	Thoughts int `json:"thoughts,omitempty"`
+
 	// Agent is set on KindSubagent events.
 	Agent *AgentRef `json:"agent,omitempty"`
 
@@ -111,6 +123,8 @@ type Totals struct {
 	ToolCalls int `json:"tool_calls"`
 	Errors    int `json:"errors"`
 	Subagents int `json:"subagents"`
+	// Thinking is how many turns reasoned before acting.
+	Thinking int `json:"thinking,omitempty"`
 	// Compactions is how many times this session's context was summarised
 	// away. A high count on a long session explains a lot of repeated work.
 	Compactions int     `json:"compactions"`
@@ -312,6 +326,8 @@ func buildFromFile(path, sessionID string) (*Timeline, error) {
 	sort.SliceStable(tl.Events, func(i, j int) bool {
 		return tl.Events[i].At.Before(tl.Events[j].At)
 	})
+	mergeThinking(tl)
+	describeThinking(tl)
 	finalize(tl)
 	return tl, nil
 }
@@ -324,12 +340,15 @@ func buildFromFile(path, sessionID string) (*Timeline, error) {
 func appendAssistant(tl *Timeline, pending map[string]int, l *line, blocks []contentBlock) {
 	var text strings.Builder
 	var tools []contentBlock
+	thoughts := 0
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
 			text.WriteString(b.Text)
 		case "tool_use":
 			tools = append(tools, b)
+		case "thinking", "redacted_thinking":
+			thoughts++
 		}
 	}
 
@@ -346,6 +365,22 @@ func appendAssistant(tl *Timeline, pending map[string]int, l *line, blocks []con
 
 	if t := strings.TrimSpace(text.String()); t != "" {
 		ev := Event{Kind: KindMessage, At: l.Timestamp, Title: "Claude", Detail: summarize(t), Full: clip(t)}
+		// A response that reasoned and then spoke: the words are the summary,
+		// and the thought count is a badge on them rather than its own row.
+		ev.Thoughts = thoughts
+		applyUsage(&ev, usage)
+		charged = true
+		tl.Events = append(tl.Events, ev)
+	} else if thoughts > 0 {
+		// Reasoned and went straight to tools, which is the common shape. Emit
+		// a row so the calls below it have a parent; its detail is filled in
+		// from the burst it produced once the events are all in order.
+		ev := Event{
+			Kind:     KindThinking,
+			At:       l.Timestamp,
+			Title:    "Thinking",
+			Thoughts: thoughts,
+		}
 		applyUsage(&ev, usage)
 		charged = true
 		tl.Events = append(tl.Events, ev)
@@ -580,6 +615,110 @@ func humanCount(n int) string {
 	}
 }
 
+// mergeThinking attaches each thinking row to the response it belongs to.
+//
+// A turn is written across several assistant lines: the reasoning on its own,
+// then the text, then the tool calls. Read per line that becomes three rows for
+// one turn, with the reasoning row apparently doing nothing.
+//
+// So a thinking row folds forward into the message that follows it — the words
+// become the summary of what the turn was pursuing, carrying a count of the
+// thoughts behind them, and the tool calls sit beneath. A turn that reasoned and
+// went straight to tools keeps its own row, because those calls would otherwise
+// have no parent.
+func mergeThinking(tl *Timeline) {
+	out := make([]Event, 0, len(tl.Events))
+	for i := 0; i < len(tl.Events); i++ {
+		ev := tl.Events[i]
+		if ev.Kind == KindThinking && i+1 < len(tl.Events) && tl.Events[i+1].Kind == KindMessage {
+			next := &tl.Events[i+1]
+			next.Thoughts += ev.Thoughts
+			// The reasoning and the words are one response as far as spend is
+			// concerned; keep the total on the row that survives.
+			next.TokensIn += ev.TokensIn
+			next.TokensOut += ev.TokensOut
+			next.CacheRead += ev.CacheRead
+			next.CacheCreate += ev.CacheCreate
+			next.CostUSD += ev.CostUSD
+			// Keep the earlier time: the turn began when it started thinking.
+			if ev.At.Before(next.At) {
+				next.At = ev.At
+			}
+			continue
+		}
+		// Consecutive fragments with nothing between them are still one thought.
+		if ev.Kind == KindThinking && len(out) > 0 && out[len(out)-1].Kind == KindThinking {
+			prev := &out[len(out)-1]
+			prev.Thoughts += ev.Thoughts
+			prev.TokensIn += ev.TokensIn
+			prev.TokensOut += ev.TokensOut
+			prev.CacheRead += ev.CacheRead
+			prev.CacheCreate += ev.CacheCreate
+			prev.CostUSD += ev.CostUSD
+			continue
+		}
+		out = append(out, ev)
+	}
+	tl.Events = out
+}
+
+// describeThinking labels each thinking row with the work it produced.
+//
+// The reasoning text is not in the transcript, so the honest summary is what
+// the turn actually did: the tools it ran. Stated as a derivation rather than
+// dressed up as the model's own words.
+func describeThinking(tl *Timeline) {
+	for i := range tl.Events {
+		if tl.Events[i].Kind != KindThinking {
+			continue
+		}
+		var names []string
+		errs := 0
+		for j := i + 1; j < len(tl.Events); j++ {
+			if tl.Events[j].Kind != KindTool {
+				break
+			}
+			if tl.Events[j].IsError {
+				errs++
+			}
+			// Repeats collapse: "Bash ×4" reads better than four Bashes.
+			if len(names) == 0 || names[len(names)-1] != tl.Events[j].Title {
+				names = append(names, tl.Events[j].Title)
+			}
+		}
+		ev := &tl.Events[i]
+		switch {
+		case len(names) == 0:
+			ev.Detail = "reasoned, no tool calls"
+		case len(names) <= 4:
+			ev.Detail = "then " + join(names, ", ")
+		default:
+			ev.Detail = "then " + join(names[:4], ", ") + fmt.Sprintf(" +%d more", len(names)-4)
+		}
+		if errs > 0 {
+			ev.Detail += fmt.Sprintf(" · %d failed", errs)
+		}
+		ev.Full = fmt.Sprintf(
+			"%d thinking block(s) in this turn.\n\n"+
+				"The reasoning text is not available. Claude Code records thinking "+
+				"blocks with an empty body and a signature only, so what the terminal "+
+				"shows live is never written to the transcript.\n\n"+
+				"What this turn did: %s",
+			ev.Thoughts, ev.Detail)
+	}
+}
+
+func join(xs []string, sep string) string {
+	out := ""
+	for i, x := range xs {
+		if i > 0 {
+			out += sep
+		}
+		out += x
+	}
+	return out
+}
+
 // dominantModel is the model that produced the most events here. A session can
 // switch models mid-run; the tooltip wants the one that did the work, not the
 // last one seen.
@@ -613,6 +752,8 @@ func finalize(tl *Timeline) {
 		case KindTool:
 			t.ToolCalls++
 			t.ToolMS += ev.DurationMS
+		case KindThinking:
+			t.Thinking++
 		case KindCompact:
 			t.Compactions++
 		case KindSubagent:

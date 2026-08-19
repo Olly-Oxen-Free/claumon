@@ -15,10 +15,10 @@ import (
 
 // UsageResponse represents the parsed OAuth usage data.
 type UsageResponse struct {
-	SessionPercent   float64
-	WeeklyPercent    float64
-	SessionResetAt   string
-	WeeklyResetAt    string
+	SessionPercent    float64
+	WeeklyPercent     float64
+	SessionResetAt    string
+	WeeklyResetAt     string
 	WeeklySonnetPct   *float64
 	WeeklySonnetReset string
 	WeeklyOpusPct     *float64
@@ -29,12 +29,12 @@ type UsageResponse struct {
 	ExtraUsageLimit   *float64
 	ExtraUsageUsed    *float64
 	WeeklyScoped      []ScopedWeeklyLimit
-	Raw              json.RawMessage
+	Raw               json.RawMessage
 }
 
 // ScopedWeeklyLimit is a per-model weekly limit from the "limits" array.
 type ScopedWeeklyLimit struct {
-	Name    string  // model display_name, e.g. "Fable"
+	Name    string // model display_name, e.g. "Fable"
 	Percent float64
 	ResetAt string // RFC3339
 }

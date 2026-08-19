@@ -39,7 +39,7 @@ func TestFleetIncludesASessionInsideTheWindow(t *testing.T) {
 	start := time.Now().Add(-2 * time.Hour)
 	dir := fleetFixture(t, "sess-a", start, 10)
 
-	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50)
+	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestFleetIncludesASessionInsideTheWindow(t *testing.T) {
 
 func TestFleetExcludesASessionOutsideTheWindow(t *testing.T) {
 	dir := fleetFixture(t, "sess-old", time.Now().Add(-48*time.Hour), 5)
-	f, err := BuildFleet(dir, time.Now().Add(-1*time.Hour), time.Now(), 50)
+	f, err := BuildFleet(dir, time.Now().Add(-1*time.Hour), time.Now(), 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestFleetIncludesASessionStraddlingTheWindowStart(t *testing.T) {
 	// Started three hours ago, still going: overlap, not containment, is the
 	// test — otherwise a long-running session vanishes from its own window.
 	dir := fleetFixture(t, "sess-long", time.Now().Add(-3*time.Hour), 170)
-	f, err := BuildFleet(dir, time.Now().Add(-1*time.Hour), time.Now(), 50)
+	f, err := BuildFleet(dir, time.Now().Add(-1*time.Hour), time.Now(), 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestFleetReportsAgentsAsSpans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50)
+	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestFleetSortsNewestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50)
+	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +174,95 @@ func TestParseWindowCoversEveryOfferedRange(t *testing.T) {
 }
 
 func TestFleetOnAnEmptyClaudeDirIsEmptyNotAnError(t *testing.T) {
-	f, err := BuildFleet(t.TempDir(), time.Now().Add(-time.Hour), time.Now(), 50)
+	f, err := BuildFleet(t.TempDir(), time.Now().Add(-time.Hour), time.Now(), 50, false)
 	if err != nil {
 		t.Fatalf("empty dir should not error: %v", err)
 	}
 	if len(f.Sessions) != 0 {
 		t.Fatalf("want no sessions, got %d", len(f.Sessions))
+	}
+}
+
+func TestBurnSeriesIsOptIn(t *testing.T) {
+	// It costs a full transcript read per session, so the default fleet must
+	// not pay for it.
+	dir := fleetFixture(t, "sess-a", time.Now().Add(-time.Hour), 20)
+	f, err := BuildFleet(dir, time.Now().Add(-2*time.Hour), time.Now(), 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Sessions[0].Burn) != 0 {
+		t.Fatalf("burn series returned without being asked for: %v", f.Sessions[0].Burn)
+	}
+}
+
+func TestBurnSeriesBucketsTokensOverTheSpan(t *testing.T) {
+	start := time.Now().Add(-time.Hour)
+	dir := fleetFixture(t, "sess-a", start, 20)
+	f, err := BuildFleet(dir, time.Now().Add(-2*time.Hour), time.Now(), 50, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	burn := f.Sessions[0].Burn
+	if len(burn) != burnBuckets {
+		t.Fatalf("burn length = %d, want %d", len(burn), burnBuckets)
+	}
+	total := 0
+	nonZero := 0
+	for _, v := range burn {
+		total += v
+		if v > 0 {
+			nonZero++
+		}
+	}
+	if total == 0 {
+		t.Fatal("every bucket empty; usage lines were not counted")
+	}
+	// The fixture writes a message a minute across an hour, so demand should be
+	// spread rather than piled into one bucket.
+	if nonZero < 2 {
+		t.Fatalf("tokens landed in %d bucket(s); expected them spread over the span", nonZero)
+	}
+}
+
+func TestBurnSeriesIsCachedUntilTheFileGrows(t *testing.T) {
+	start := time.Now().Add(-time.Hour)
+	dir := fleetFixture(t, "sess-a", start, 5)
+	path := filepath.Join(dir, "projects", "-home-me-proj", "sess-a.jsonl")
+	end := time.Now()
+
+	first := BurnSeries(path, start, end)
+	sum := func(xs []int) int {
+		t := 0
+		for _, v := range xs {
+			t += v
+		}
+		return t
+	}
+	before := sum(first)
+	if before == 0 {
+		t.Fatal("no tokens counted")
+	}
+
+	// Appending must invalidate: a live session's file grows between polls, and
+	// a stale series would freeze its heat.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := map[string]any{
+		"type": "assistant", "timestamp": end.Add(-time.Minute).Format(time.RFC3339),
+		"message": map[string]any{"role": "assistant", "model": "m", "content": []any{},
+			"usage": map[string]any{"output_tokens": 999999}},
+	}
+	b, _ := json.Marshal(line)
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	after := sum(BurnSeries(path, start, end))
+	if after <= before {
+		t.Fatalf("series did not pick up appended usage: %d then %d", before, after)
 	}
 }

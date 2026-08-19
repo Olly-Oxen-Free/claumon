@@ -52,8 +52,12 @@ type FleetSession struct {
 	// Tokens is everything the session moved through the model, cache reads
 	// included. Used for the heat view, where the question is burn rate rather
 	// than billable spend.
-	Tokens    int  `json:"tokens"`
-	IsRunning bool `json:"is_running"`
+	Tokens int `json:"tokens"`
+	// Burn is tokens per equal time bucket across the session's span, filled
+	// only when the caller asks for heat data. It is what lets a bar be shaded
+	// along its length instead of averaged to one colour.
+	Burn      []int `json:"burn,omitempty"`
+	IsRunning bool  `json:"is_running"`
 
 	Agents []FleetAgent `json:"agents,omitempty"`
 
@@ -120,7 +124,9 @@ type FleetAgent struct {
 // scanLimit bounds how many recent sessions are considered before filtering.
 // A window is a time range, but the transcripts on disk are not indexed by
 // time, so the scan is bounded by recency and then filtered.
-func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, error) {
+// BuildFleet returns the window's sessions. withBurn adds a per-session token
+// series, which costs a full transcript read per session and is therefore opt-in.
+func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bool) (*Fleet, error) {
 	// One call, reused for every session: herdr is asked once per request
 	// rather than once per row. Failure is silent by design — the fleet is
 	// complete without it.
@@ -195,6 +201,9 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 		}
 		if path != "" {
 			fs.Agents = agentSpans(sessionDir(path, s.ID))
+			if withBurn {
+				fs.Burn = BurnSeries(path, start, end)
+			}
 		}
 		if h, ok := panes[s.ID]; ok {
 			fs.Herdr = &HerdrRef{
