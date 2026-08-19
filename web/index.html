@@ -440,12 +440,23 @@ tr.clickable { cursor: pointer; }
 .ev-ic { width:13px; height:13px; flex:0 0 13px; vertical-align:-2px; }
 .ev-ic use { fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
 .ev-ic.fill use { fill:currentColor; stroke:none; }
-.ic-tool  { color:var(--teal); }
-.ic-agent { color:var(--purple); }
-.ic-user  { color:var(--green); }
-.ic-model { color:var(--text-dim); }
+/* Who produced a line, as one set of tokens rather than a colour repeated at
+   each use: the rail, the icon and any future accent all read from these, so
+   changing what "the model" looks like is a single edit. --blue is defined
+   here because the base palette is warm and has none. */
+:root {
+  --ev-user:  #6aa6e8;
+  --ev-model: var(--accent);
+  --ev-tool:  #8a8079;
+  --ev-agent: var(--purple);
+}
+.ic-tool  { color:var(--ev-tool); }
+.ic-agent { color:var(--ev-agent); }
+.ic-user  { color:var(--ev-user); }
+.ic-model { color:var(--ev-model); }
 .ic-err   { color:var(--red); }
-.ic-mcp   { color:var(--teal); }
+/* An MCP call is still tool usage; the plug shape is what sets it apart. */
+.ic-mcp   { color:var(--ev-tool); }
 
 /* Lane markers: key moments drawn on the bar itself, each in a disc so it
    reads against the span behind it and stays legible where bars overlap.
@@ -561,7 +572,7 @@ tr.clickable { cursor: pointer; }
 .tl-row.expandable:hover { background:var(--bg-hover); }
 .tl-row.open { background:var(--bg-hover); }
 .tl-body { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.tl-expand { background:var(--bg); border-left:2px solid var(--accent); }
+.tl-expand { background:var(--bg); border-left:2px solid var(--ev-tool); }
 .tl-expand.d0 { margin-left:0; }
 .tl-expand.d1 { margin-left:22px; }
 .tl-outlabel {
@@ -602,12 +613,13 @@ tr.clickable { cursor: pointer; }
 }
 .tl-row.d0 { --rail:0px; }
 .tl-row.d1 { --rail:22px; }
-.tl-row.tool::before { background:var(--accent); }
+.tl-row.tool::before { background:var(--ev-tool); }
+.tl-row.message::before { background:var(--ev-model); }
 .tl-row.subagent { cursor:pointer; }
 .tl-row.subagent::before { background:var(--purple); }
 .tl-row.subagent:hover { background:rgba(184,154,218,.08); }
 .tl-row.err::before { background:var(--red); }
-.tl-row.prompt::before { background:var(--teal); }
+.tl-row.prompt::before { background:var(--ev-user); }
 .tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; }
 .tl-glyph { text-align:center; }
 .tl-title { font-weight:600; }
