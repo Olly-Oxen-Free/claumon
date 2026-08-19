@@ -615,13 +615,19 @@ tr.clickable { cursor: pointer; }
 .tl-tip dt { color:var(--text-dim); font-size:11px; }
 .tl-tip dd { margin:0; font-family:ui-monospace,monospace; font-size:11px; }
 
+/* The tab is three stacked blocks — totals, map, events — separated by one
+   value so the rhythm is even. .tl-graph carried a margin until the chart's CSS
+   was replaced and the rule went with it, leaving the map tight against the
+   list while the totals kept their gap. */
+:root { --tl-gap:18px; }
+.tl-graph { margin-bottom:var(--tl-gap); }
 .tl-listbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .tl-listtitle { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; margin-right:4px; }
 /* Filter chip in the event list's header. */
 .tl-chip {
   display:inline-flex; align-items:center; gap:5px;
   background:var(--bg-surface); border:1px solid var(--purple);
-  border-radius:11px; padding:1px 4px 1px 7px; font-size:11px; margin-right:6px;
+  border-radius:11px; padding:1px 4px 1px 7px; font-size:11px;
 }
 .tl-chip-name { color:var(--text-bright); max-width:180px; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap; }
@@ -679,7 +685,7 @@ tr.clickable { cursor: pointer; }
   background:var(--bg-surface); color:var(--text); border:1px solid var(--border);
   border-radius:6px; padding:6px 10px; font-size:13px; max-width:520px;
 }
-.tl-totals { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:16px; }
+.tl-totals { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:var(--tl-gap); }
 .tl-total { display:flex; flex-direction:column; gap:2px; }
 .tl-total .v { font-size:18px; font-weight:600; }
 .tl-total .k { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; }
@@ -1430,8 +1436,8 @@ tr.clickable { cursor: pointer; }
     <div class="tl-graph" id="tl-graph"></div>
     <div class="tl-tip" id="tl-tip"></div>
     <div class="tl-listbar">
-      <span id="tl-filterchip"></span>
       <span class="tl-listtitle">Events</span>
+      <span id="tl-filterchip"></span>
       <button class="fl-btn tl-sortdir" id="tl-sortdir" title="newest first — click to reverse">
         <svg class="tl-arrow" viewBox="0 0 16 16"><use href="#ic-arrow-down"/></svg>
       </button>
