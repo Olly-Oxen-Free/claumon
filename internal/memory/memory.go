@@ -536,6 +536,39 @@ func discoverProjectMemories(projDir, projName string) []*MemoryFile {
 	}
 
 	out = append(out, globMarkdownFiles(filepath.Join(projName, ".claude", "rules"), projName, "rules")...)
+	out = append(out, discoverBrain(projName)...)
+	return out
+}
+
+// brainDirs are the brain/ subdirectories worth surfacing as memory, in the order
+// they should appear. The wiki is regenerable synthesis; raw/ is durable primary
+// evidence that survives context compaction; corrections/ records mistakes and the
+// patches that fixed them. Everything under brain/_brain/ is machine state (caches,
+// the code graph, brain_state.json) and is deliberately excluded.
+var brainDirs = []struct {
+	rel      string
+	category string
+}{
+	{filepath.Join("brain", "wiki"), "brain-wiki"},
+	{filepath.Join("brain", "raw"), "brain-raw"},
+	{filepath.Join("brain", "raw", "sessions"), "brain-raw"},
+	{filepath.Join("brain", "raw", "sources"), "brain-raw"},
+	{filepath.Join("brain", "raw", "corrections"), "brain-corrections"},
+}
+
+// discoverBrain collects a project's brain/ knowledge base, if it has one.
+// Projects without brain/ return nil, so this is a no-op for most of them.
+func discoverBrain(projName string) []*MemoryFile {
+	if projName == "" {
+		return nil
+	}
+	if info, err := os.Stat(filepath.Join(projName, "brain")); err != nil || !info.IsDir() {
+		return nil
+	}
+	var out []*MemoryFile
+	for _, d := range brainDirs {
+		out = append(out, globMarkdownFiles(filepath.Join(projName, d.rel), projName, d.category)...)
+	}
 	return out
 }
 
