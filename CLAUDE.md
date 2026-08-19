@@ -42,3 +42,29 @@ Frontend is a single `web/index.html` embedded via `//go:embed`. No build step, 
 - Tests: table-driven where applicable, `_test.go` alongside source files. Race detector is on.
 - Version injected via `-ldflags "-X main.version=..."` at build time.
 - Cross-platform: no CGO (`CGO_ENABLED=0`), builds for darwin/linux/windows × amd64/arm64 via goreleaser.
+
+## Git hygiene — do not create orphans
+
+An audit on 2026-08-18 found **21 abandoned stashes** (oldest 253 days) and **8 orphaned worktrees**
+holding 103 uncommitted files. Most were created by parallel agents stashing to switch branches and
+never restoring. This is the single most expensive habit in this workspace.
+
+- **Prefer a WIP commit on a branch over `git stash`.** A commit has a name, a branch, and shows up
+  in `git log`. A stash is invisible until someone runs `git stash list`, and nobody does.
+  If you must stash, give it a real message (`git stash push -m "why, and what to do next"`) — never
+  a bare `git stash`.
+- **A worktree belongs to a task.** When the task ends, `git worktree remove` it. Do not leave one
+  behind "in case" — that is how 19 GB accumulated.
+- **Never stash another agent's changes.** In a shared tree, a stash silently removes someone else's
+  uncommitted work from their view. Stop and ask instead.
+- **Before finishing a session that touched branches**, run `git-hygiene .` and leave the repo no
+  worse than you found it.
+
+`git-hygiene` (in `~/.local/bin`) reports stale stashes and dirty or already-merged worktrees.
+A SessionStart hook warns automatically when the current repo has either.
+
+## Task capture (planned)
+
+Follow-up work found here should become an **aven task**, not prose that scrolls away — deferred
+scope, blocked items, gaps that need a human decision or an external lookup. Not built yet; the
+hook points are recorded in `~/.claude/AVEN-INTEGRATION.md`. A fork of aven is intended.

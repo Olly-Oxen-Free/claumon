@@ -569,13 +569,23 @@ tr.clickable { cursor: pointer; }
 .fl-row + .fl-row { border-top:1px solid var(--border); }
 .fl-row:hover { background:rgba(127,127,127,.06); }
 .fl-label {
-  position:sticky; left:0; z-index:2; flex:0 0 190px; width:190px;
+  position:sticky; left:0; z-index:2; flex:0 0 300px; width:300px;
   display:flex; gap:6px; align-items:baseline; padding:0 8px; height:24px; line-height:24px;
   background:var(--bg-surface); border-right:1px solid var(--border);
   font-size:11px; cursor:pointer; overflow:hidden;
 }
 .fl-row:hover .fl-label { background:var(--bg-hover); }
-.fl-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fl-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1 1 auto; min-width:0; }
+/* Where the work happened, under the name of the work. Dim and shrinkable:
+   when the label runs out of room the location gives way before the task
+   name does, because two rows in one repo are told apart by their names. */
+.fl-ctx {
+  color:var(--text-dim); font-size:10px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; min-width:0;
+}
+/* A worktree name is the one part of the location that distinguishes
+   otherwise identical rows, so it is the part that keeps its colour. */
+.fl-wt { color:var(--purple); }
 .fl-when { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:10px; margin-left:auto; }
 .fl-label.agent { padding-left:22px; }
 .fl-label.agent .fl-name { color:var(--purple); }
@@ -3973,7 +3983,7 @@ const FL_WINDOWS = [
   { key: '1w', label: '1 week',  pxPerHour: 22,  tick: 12 * 3600 * 1000 },
 ];
 
-const FL_LABEL_PX = 190;
+const FL_LABEL_PX = 300;
 
 let flWindow = '1d';
 let flEnd = null;            // null means "now", refreshed on each render
@@ -4071,13 +4081,28 @@ function flForkCurve(child, childBarX, clampBar, colorOverride) {
 // The filter, named where its effect is felt. The map has its own clear button,
 // but the event list is the thing being narrowed, so it says so too — and can be
 // released from here without going back up to the chart.
+// flLocation spells out where a session ran, in one line: repo, worktree if it
+// is a linked one, and the full path behind them. Used for hover titles, where
+// the truncated label needs expanding rather than repeating.
+function flLocation(s) {
+  const parts = [];
+  if (s.repo) parts.push(s.repo);
+  if (s.worktree) parts.push('⑂ ' + s.worktree);
+  if (s.git_branch) parts.push('(' + s.git_branch + ')');
+  const where = parts.join(' ');
+  if (s.title && where) return s.title + ' — ' + where + (s.cwd ? '\n' + s.cwd : '');
+  return s.title || where || s.cwd || '';
+}
+
 function tlRenderFilterChip() {
   const host = document.getElementById('tl-filterchip');
   if (!host) return;
   if (!flFocused || !flData) { host.innerHTML = ''; return; }
   const s = flData.sessions.find(x => x.session_id === flFocused);
-  const label = (s && (s.repo || s.title)) || flFocused.slice(0, 8);
-  const full = s ? (s.title || s.cwd || flFocused) : flFocused;
+  // Same naming as the row it filters on: the task name first, the location
+  // only when there is no name for it.
+  const label = (s && (s.title || s.repo)) || flFocused.slice(0, 8);
+  const full = s ? (flLocation(s) || flFocused) : flFocused;
   host.innerHTML = `<span class="tl-chip" title="${escHtml(full)}">` +
     `<svg class="ev-ic ic-agent" viewBox="0 0 16 16"><use href="#ic-fork"/></svg>` +
     `<span class="tl-chip-name">${escHtml(label)}</span>` +
@@ -4344,7 +4369,19 @@ function flRender() {
     const agents = s.agents || [];
 
     const caret = agents.length ? (open ? '▾ ' : '▸ ') : '';
-    const label = `${caret}${s.repo || 'unknown'}${agents.length ? ` · ${agents.length}` : ''}`;
+    // Name the row the way the user named the work. herdr's tab title is that
+    // name; a directory basename is only a fallback, and a poor one when a
+    // dozen sessions share one workspace directory.
+    const name = s.title || s.repo || 'unknown';
+    const label = `${caret}${name}${agents.length ? ` · ${agents.length}` : ''}`;
+    // The location goes underneath as context. It is dropped when it would
+    // only repeat the name.
+    let ctx = '';
+    if (s.worktree) {
+      ctx = `${escHtml(s.repo || '')}<span class="fl-wt"> ⑂ ${escHtml(s.worktree)}</span>`;
+    } else if (s.title && s.repo) {
+      ctx = escHtml(s.repo);
+    }
     const forkIcon = s.forked_from
       ? `<svg class="ev-ic fl-forkic" viewBox="0 0 16 16" title="split from another session"><use href="#ic-fork"/></svg>`
       : '';
@@ -4430,8 +4467,8 @@ function flRender() {
     }
 
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}" data-session="${escHtml(s.session_id)}">
-      <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml((s.title || s.cwd || ''))}">
-        ${forkIcon}<span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
+      <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml(flLocation(s))}">
+        ${forkIcon}<span class="fl-name">${escHtml(label)}</span>${ctx ? `<span class="fl-ctx">${ctx}</span>` : ''}<span class="fl-when">${meta}</span>
       </div>
       <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
         ${link}${bars}
@@ -4754,7 +4791,7 @@ function flMarkTipHtml(s, mark, agentId, detail) {
   const when = isStart ? s.started_at : s.ended_at;
   const rows = [
     [isStart ? 'started' : 'ended', fmt(when)],
-    ['repo', s.repo || '—'],
+    ['repo', (s.repo || '—') + (s.worktree ? ' ⑂ ' + s.worktree : '')],
     ['ran for', fmtDur(new Date(s.ended_at) - sessionStart) || '—'],
     ['agents', (s.agents || []).length],
     ['cost', '$' + (s.cost_usd || 0).toFixed(2)],
@@ -4771,6 +4808,8 @@ function flTipHtml(s, agent) {
   const rows = [];
 
   rows.push(['repo', s.repo || '—']);
+  if (s.worktree) rows.push(['worktree', s.worktree]);
+  if (s.title) rows.push(['task', s.title]);
   if (s.cwd) rows.push(['tree', s.cwd]);
   if (s.git_branch) rows.push(['branch', s.git_branch]);
   if (s.forked_from) {

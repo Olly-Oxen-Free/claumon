@@ -39,7 +39,11 @@ type Fleet struct {
 type FleetSession struct {
 	SessionID string `json:"session_id"`
 	// Repo is the working tree's basename — the name a person uses for it.
-	Repo      string `json:"repo,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// Worktree is the linked git worktree's name, empty for a main checkout.
+	// Two sessions in the same repo on different worktrees are different work
+	// and share a cwd basename, so this is what tells them apart.
+	Worktree  string `json:"worktree,omitempty"`
 	Cwd       string `json:"cwd,omitempty"`
 	GitBranch string `json:"git_branch,omitempty"`
 	Model     string `json:"model,omitempty"`
@@ -101,7 +105,8 @@ type HerdrRef struct {
 	PaneID      string `json:"pane_id"`
 	TabID       string `json:"tab_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
-	// Title is the tab's task name.
+	// Title is the tab's task name — what the user called this piece of work,
+	// which names a thread far better than any directory can.
 	Title string `json:"title,omitempty"`
 	// Status is herdr's live view: working or idle. More reliable than
 	// inferring from file mtimes, because herdr watches the process.
@@ -195,7 +200,13 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 			ForkedFrom: forked,
 		}
 		if cwd != "" {
+			// The cwd basename stays the location's name: a session run in a
+			// module or subdirectory is best named by that directory, not by
+			// the repository root far above it. The worktree is added
+			// alongside, because that is the part the basename cannot show —
+			// two checkouts of one repo have the same basename.
 			fs.Repo = filepath.Base(cwd)
+			fs.Worktree = worktreeOf(cwd).Name
 		} else if s.Project != "" {
 			fs.Repo = filepath.Base(s.Project)
 		}
@@ -219,9 +230,20 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 			if h.Status == "working" {
 				fs.IsRunning = true
 			}
-			if fs.Title == "" {
+			// herdr's tab title is the name the user gave this task. It beats
+			// anything derived from the transcript, so it wins outright rather
+			// than only filling a gap.
+			if h.Title != "" {
 				fs.Title = h.Title
 			}
+		}
+		// A session's own title falls back to its first user message, which
+		// for a session resumed from a local command is the harness's caveat
+		// preamble rather than anything the user said. That text is identical
+		// across every such session, so it names nothing — drop it and let the
+		// location label the row.
+		if isBoilerplateTitle(fs.Title) {
+			fs.Title = ""
 		}
 		out.Sessions = append(out.Sessions, fs)
 	}
@@ -476,4 +498,24 @@ func ParseWindow(name string) time.Duration {
 	default:
 		return 24 * time.Hour
 	}
+}
+
+// isBoilerplateTitle reports whether a derived title is harness text rather
+// than a description of the work.
+func isBoilerplateTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"Caveat: The messages below",
+		"<command-name>",
+		"<local-command",
+		"This session is being continued",
+	} {
+		if strings.HasPrefix(t, prefix) {
+			return true
+		}
+	}
+	return false
 }
