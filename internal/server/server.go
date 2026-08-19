@@ -31,6 +31,7 @@ func New(claudeDir string, st *store.Store, webFS fs.FS) *Server {
 	mux.HandleFunc("GET /api/heatmap", handlers.HandleHeatmap)
 	mux.HandleFunc("GET /api/history", handlers.HandleHistory)
 	mux.HandleFunc("GET /api/sessions", handlers.HandleSessions)
+	mux.HandleFunc("GET /api/sessions/search", handlers.HandleSessionSearch)
 	mux.HandleFunc("GET /api/live", handlers.HandleLive)
 	mux.HandleFunc("GET /api/timeline/{id}", handlers.HandleTimeline)
 	mux.HandleFunc("GET /api/timeline/{id}/agents/{agent}", handlers.HandleAgentTimeline)

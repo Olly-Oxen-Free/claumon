@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,6 +184,29 @@ func (h *Handlers) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		history = []store.DailyAggregate{}
 	}
 	writeJSON(w, history)
+}
+
+// HandleSessionSearch searches message text across every session transcript.
+//
+// Query params: q (required), limit (optional, 1..500, default 100).
+func (h *Handlers) HandleSessionSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if strings.TrimSpace(q) == "" {
+		writeJSONError(w, "q is required", http.StatusBadRequest)
+		return
+	}
+	limit := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	res, err := parser.SearchSessions(h.claudeDir, q, limit)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, res)
 }
 
 func (h *Handlers) HandleSessions(w http.ResponseWriter, r *http.Request) {
