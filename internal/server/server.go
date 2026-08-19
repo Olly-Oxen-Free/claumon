@@ -77,6 +77,13 @@ func secureLocalRequests(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
+		} else {
+			// The dashboard is a single embedded file with a stable URL, and
+			// the embedded filesystem has no meaningful modification time, so
+			// a browser will happily hold a stale copy across a rebuild —
+			// showing an old UI against a new binary, which reads as the new
+			// work simply not existing. Revalidate every load.
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {

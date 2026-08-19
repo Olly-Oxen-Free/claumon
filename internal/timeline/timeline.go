@@ -19,6 +19,7 @@ package timeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,6 +41,11 @@ const (
 	KindTool Kind = "tool"
 	// KindSubagent is a Task call, joined to the agent it spawned.
 	KindSubagent Kind = "subagent"
+	// KindCompact is a context compaction: the point where the conversation
+	// was summarised and most of its history dropped. Worth marking, because
+	// everything before it is no longer in the model's context, and a session
+	// often behaves differently on either side of one.
+	KindCompact Kind = "compact"
 )
 
 // Event is one entry in the timeline.
@@ -101,11 +107,14 @@ type AgentRef struct {
 
 // Totals aggregates a timeline.
 type Totals struct {
-	Events    int     `json:"events"`
-	ToolCalls int     `json:"tool_calls"`
-	Errors    int     `json:"errors"`
-	Subagents int     `json:"subagents"`
-	CostUSD   float64 `json:"cost_usd"`
+	Events    int `json:"events"`
+	ToolCalls int `json:"tool_calls"`
+	Errors    int `json:"errors"`
+	Subagents int `json:"subagents"`
+	// Compactions is how many times this session's context was summarised
+	// away. A high count on a long session explains a lot of repeated work.
+	Compactions int     `json:"compactions"`
+	CostUSD     float64 `json:"cost_usd"`
 	// ToolMS is time spent inside tool calls and subagents. Calls that ran in
 	// parallel are each counted in full, so this is work performed, not wall
 	// clock, and legitimately exceeds the session's duration.
@@ -136,13 +145,22 @@ type Timeline struct {
 
 type line struct {
 	Type      string    `json:"type"`
+	Subtype   string    `json:"subtype"`
 	Timestamp time.Time `json:"timestamp"`
 	UUID      string    `json:"uuid"`
 	SessionID string    `json:"sessionId"`
 	CWD       string    `json:"cwd"`
 	GitBranch string    `json:"gitBranch"`
 	IsMeta    bool      `json:"isMeta"`
-	Message   *struct {
+	// CompactMetadata is present on a compact_boundary system line.
+	CompactMetadata *struct {
+		Trigger                 string `json:"trigger"`
+		PreTokens               int    `json:"preTokens"`
+		PostTokens              int    `json:"postTokens"`
+		CumulativeDroppedTokens int    `json:"cumulativeDroppedTokens"`
+		DurationMS              int64  `json:"durationMs"`
+	} `json:"compactMetadata"`
+	Message *struct {
 		Role    string          `json:"role"`
 		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
@@ -264,6 +282,10 @@ func buildFromFile(path, sessionID string) (*Timeline, error) {
 		}
 		if tl.GitBranch == "" && l.GitBranch != "" {
 			tl.GitBranch = l.GitBranch
+		}
+		if l.Type == "system" && l.Subtype == "compact_boundary" {
+			tl.Events = append(tl.Events, compactEvent(&l))
+			continue
 		}
 		if l.Message == nil || l.IsMeta {
 			continue
@@ -516,6 +538,48 @@ func readMeta(path string) agentMeta {
 	return m
 }
 
+// compactEvent describes a context compaction in the terms that matter: what
+// triggered it, and how much history it dropped.
+func compactEvent(l *line) Event {
+	ev := Event{
+		Kind:  KindCompact,
+		At:    l.Timestamp,
+		Title: "Compacted",
+	}
+	m := l.CompactMetadata
+	if m == nil {
+		return ev
+	}
+	trigger := m.Trigger
+	if trigger == "" {
+		trigger = "unknown"
+	}
+	ev.DurationMS = m.DurationMS
+	dropped := m.PreTokens - m.PostTokens
+	if dropped < 0 {
+		dropped = 0
+	}
+	ev.Detail = fmt.Sprintf("%s · %s → %s tokens, %s dropped",
+		trigger, humanCount(m.PreTokens), humanCount(m.PostTokens), humanCount(dropped))
+	ev.Full = fmt.Sprintf(
+		"trigger: %s\nbefore: %d tokens\nafter: %d tokens\ndropped: %d tokens\ncumulative dropped: %d tokens\ntook: %s",
+		trigger, m.PreTokens, m.PostTokens, dropped, m.CumulativeDroppedTokens,
+		(time.Duration(m.DurationMS) * time.Millisecond).Round(time.Second))
+	return ev
+}
+
+// humanCount abbreviates a token count; exact figures live in the expansion.
+func humanCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 // dominantModel is the model that produced the most events here. A session can
 // switch models mid-run; the tooltip wants the one that did the work, not the
 // last one seen.
@@ -549,6 +613,8 @@ func finalize(tl *Timeline) {
 		case KindTool:
 			t.ToolCalls++
 			t.ToolMS += ev.DurationMS
+		case KindCompact:
+			t.Compactions++
 		case KindSubagent:
 			t.Subagents++
 			t.ToolMS += ev.DurationMS

@@ -449,14 +449,43 @@ tr.clickable { cursor: pointer; }
   --ev-model: var(--accent);
   --ev-tool:  #8a8079;
   --ev-agent: var(--purple);
+  --ev-compact: var(--yellow);
 }
 .ic-tool  { color:var(--ev-tool); }
 .ic-agent { color:var(--ev-agent); }
 .ic-user  { color:var(--ev-user); }
 .ic-model { color:var(--ev-model); }
 .ic-err   { color:var(--red); }
+.ic-compact { color:var(--ev-compact); }
 /* An MCP call is still tool usage; the plug shape is what sets it apart. */
 .ic-mcp   { color:var(--ev-tool); }
+
+/* The thread being read. Brighter and lit, so it is findable at a glance in a
+   chart of twenty rows without hiding the others. */
+.fl-row.sel { background:rgba(218,119,86,.07); }
+.fl-row.sel .fl-label { background:rgba(218,119,86,.10); }
+.fl-row.sel .fl-name { color:var(--text-bright); font-weight:600; }
+.fl-row.sel .fl-bar {
+  opacity:1;
+  box-shadow:0 0 6px 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.fl-row.sel .fl-bar.agent {
+  box-shadow:0 0 6px 1px color-mix(in srgb, var(--purple) 55%, transparent);
+}
+.fl-row.sel .fl-bar.live {
+  box-shadow:0 0 6px 1px color-mix(in srgb, var(--green) 55%, transparent);
+}
+.fl-row.sel .fl-mark { border-width:1.5px; }
+
+/* Reading marker: where the event list is, projected onto the timeline. */
+.fl-read {
+  position:absolute; top:0; width:0; height:0; display:none;
+  border-left:5px solid transparent; border-right:5px solid transparent;
+  border-top:7px solid var(--ev-user);
+  transform:translateX(-50%); z-index:3; pointer-events:none;
+  filter:drop-shadow(0 0 3px color-mix(in srgb, var(--ev-user) 70%, transparent));
+}
+.fl-mark.compact { color:var(--ev-compact); }
 
 /* Lane markers: key moments drawn on the bar itself, each in a disc so it
    reads against the span behind it and stays legible where bars overlap.
@@ -474,6 +503,9 @@ tr.clickable { cursor: pointer; }
 .fl-mark.start { color:var(--yellow); }
 .fl-mark.end   { color:var(--text-dim); }
 .fl-mark.agent { color:var(--purple); }
+
+.fl-clear { border-color:var(--accent); color:var(--accent); }
+.fl-clear:hover { background:rgba(218,119,86,.12); color:var(--text-bright); }
 
 .fl-zoomlabel { min-width:38px; font-family:ui-monospace,monospace; }
 
@@ -634,6 +666,10 @@ tr.clickable { cursor: pointer; }
 .tl-row.subagent:hover { background:rgba(184,154,218,.08); }
 .tl-row.err::before { background:var(--red); }
 .tl-row.prompt::before { background:var(--ev-user); }
+.tl-row.compact::before { background:var(--ev-compact); }
+/* A compaction is a hinge in the session, not another line of chat. */
+.tl-row.compact { background:rgba(232,200,114,.06); }
+.tl-row.compact .tl-title { color:var(--ev-compact); }
 .tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; white-space:nowrap; }
 .tl-glyph { text-align:center; }
 .tl-title { font-weight:600; }
@@ -1172,6 +1208,7 @@ tr.clickable { cursor: pointer; }
   <g id="ic-msg"><path d="M2 3h12v8H6l-4 3z"/></g>
   <g id="ic-spark"><path d="M8 2l1.6 4.4L14 8l-4.4 1.6L8 14l-1.6-4.4L2 8l4.4-1.6z"/></g>
   <g id="ic-alert"><circle cx="8" cy="8" r="6"/><path d="M8 5v4M8 11h.01"/></g>
+  <g id="ic-layers"><path d="M8 2 2 5l6 3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>
   <g id="ic-flag"><path d="M4 14V2h8l-2 3 2 3H4"/></g>
   <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
 </defs></svg>
@@ -3489,6 +3526,7 @@ let tlSessions = [];
 let tlSelected = null;
 let tlCurrentTimeline = null;
 let tlRefreshTimer = null;
+let flRefreshTimer = null;
 const tlExpanded = new Set();
 
 function fmtDur(ms) {
@@ -3526,7 +3564,8 @@ const EV_ICONS = {
 
 function evIcon(e) {
   let id = 'ic-spark', tone = 'ic-model', filled = true;
-  if (e.kind === 'prompt') { id = 'ic-msg'; tone = 'ic-user'; filled = false; }
+  if (e.kind === 'compact') { id = 'ic-layers'; tone = 'ic-compact'; filled = false; }
+  else if (e.kind === 'prompt') { id = 'ic-msg'; tone = 'ic-user'; filled = false; }
   else if (e.kind === 'subagent') { id = 'ic-bot'; tone = 'ic-agent'; filled = false; }
   else if (e.kind === 'tool') {
     // An MCP tool is named server__tool; anything unmapped falls back to the
@@ -3554,7 +3593,7 @@ function tlLoadSessions() {
         const when = fmtTimeAgo(x.last_activity);
         return `<option value="${escHtml(x.id)}">${escHtml(shortProject(x.project || x.cwd))} — ${escHtml(when)}</option>`;
       }).join('');
-      tlLoad(tlSessions[0].id);
+      flSelectSession(tlSessions[0].id);
     })
     .catch(() => {
       document.getElementById('tl-list').innerHTML =
@@ -3575,8 +3614,9 @@ function tlLoad(sessionId) {
       tlRenderTotals(tl.totals);
       tlRenderEvents(tl, sessionId);
       tlRenderLive(sessionId);
-      document.getElementById('tl-list').scrollTop = tlSort === 'desc' ? 0 : 0;
+      document.getElementById('tl-list').scrollTop = 0;
       tlSetPausedFlag();
+      tlSyncReadMarker();
     })
     .catch(() => {
       document.getElementById('tl-totals').innerHTML = '';
@@ -3591,6 +3631,7 @@ function tlRenderTotals(t) {
     ['tools', t.tool_calls],
     ['subagents', t.subagents],
     ['errors', t.errors],
+    ...(t.compactions ? [['compacted', t.compactions]] : []),
     ['cost', '$' + (t.cost_usd || 0).toFixed(2)],
     // Parallel calls each count in full, so this is work done, not elapsed.
     ['tool time', fmtDur(t.tool_ms) || '0s'],
@@ -3627,7 +3668,7 @@ function tlEventRow(e, sessionId) {
   // Indent level, so the shape of the conversation reads at a glance: what
   // you said and what Claude said sit at the outer level, and the tool calls
   // Claude made to answer sit under them.
-  const depth = (e.kind === 'prompt' || e.kind === 'message') ? 0 : 1;
+  const depth = (e.kind === 'prompt' || e.kind === 'message' || e.kind === 'compact') ? 0 : 1;
   cls.push('d' + depth);
 
   const expandable = !!(e.full || e.output);
@@ -3668,6 +3709,42 @@ function tlListPinned() {
   if (!list) return true;
   return tlSort === 'desc' ? list.scrollTop <= 8
                            : list.scrollTop + list.clientHeight >= list.scrollHeight - 8;
+}
+
+// Draws a chevron on the map at the time of whichever event is at the top of
+// the list, so scrolling the history moves a marker across the timeline and
+// you can see where in the session you are reading.
+function tlSyncReadMarker() {
+  const host = document.getElementById('tl-graph');
+  const list = document.getElementById('tl-list');
+  if (!host || !list || !flScale) return;
+
+  let marker = host.querySelector('.fl-read');
+  const ruler = host.querySelector('.fl-ruler .fl-track');
+  if (!ruler) return;
+  if (!marker) {
+    marker = document.createElement('i');
+    marker.className = 'fl-read';
+    ruler.appendChild(marker);
+  }
+
+  // The first row whose top edge is at or below the list's own top edge.
+  const listTop = list.getBoundingClientRect().top;
+  let at = null;
+  for (const row of list.querySelectorAll('.tl-row')) {
+    if (row.getBoundingClientRect().bottom >= listTop) {
+      const e = (tlCurrentTimeline && tlCurrentTimeline.events || [])
+        .find(x => x.seq === Number(row.dataset.seq));
+      if (e) at = new Date(e.at).getTime();
+      break;
+    }
+  }
+  if (at === null || at < flScale.from || at > flScale.to) {
+    marker.style.display = 'none';
+    return;
+  }
+  marker.style.display = 'block';
+  marker.style.left = flScale.x(at) + 'px';
 }
 
 function tlSetPausedFlag() {
@@ -3760,7 +3837,7 @@ document.getElementById('tl-list').addEventListener('click', ev => {
     .catch(() => { box.innerHTML = '<div class="tl-empty">Could not load that agent.</div>'; });
 });
 
-document.getElementById('tl-session').addEventListener('change', e => tlLoad(e.target.value));
+document.getElementById('tl-session').addEventListener('change', e => flSelectSession(e.target.value));
 
 document.querySelectorAll('.tl-listbar .fl-btn').forEach(b =>
   b.addEventListener('click', () => {
@@ -3774,7 +3851,10 @@ document.querySelectorAll('.tl-listbar .fl-btn').forEach(b =>
     tlSetPausedFlag();
   }));
 
-document.getElementById('tl-list').addEventListener('scroll', tlSetPausedFlag);
+document.getElementById('tl-list').addEventListener('scroll', () => {
+  tlSetPausedFlag();
+  tlSyncReadMarker();
+});
 
 // Loaded on first visit rather than at startup: parsing a transcript is real
 // work, and most visits never open this tab.
@@ -3786,7 +3866,12 @@ function tlActivate() {
   // A live session keeps producing events; refresh on a timer, and let
   // tlRefresh decide whether the reader is in a position to accept them.
   clearInterval(tlRefreshTimer);
-  tlRefreshTimer = setInterval(tlRefresh, 5000);
+  tlRefreshTimer = setInterval(tlRefresh, 4000);
+  // The map tails the same activity. Slower, because a session appearing or
+  // ending is a coarser event than a tool call, and each pass re-reads every
+  // session summary in the window.
+  clearInterval(flRefreshTimer);
+  flRefreshTimer = setInterval(flRefresh, 10000);
 }
 
 
@@ -3832,6 +3917,12 @@ const FL_ZOOM_MAX = 16;
 // When set, flRender restores this scroll position instead of leaving it to
 // the browser — used to hold the point under the cursor still while zooming.
 let flPendingScrollLeft = null;
+// The last rendered time scale, so the reading marker can be placed on scroll
+// without re-rendering the whole map.
+let flScale = null;
+// When set, the map shows only this session and the agents it spawned.
+// Focusing is how you stop reading twenty threads at once and read one.
+let flFocused = null;
 
 // A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
 function flMark(id) {
@@ -3840,6 +3931,15 @@ function flMark(id) {
 
 function flSpec() {
   return FL_WINDOWS.find(w => w.key === flWindow) || FL_WINDOWS[2];
+}
+
+// Reloads the map in place: same window, same scroll, same expanded rows.
+// Used by the live tick, where anything that moved the view would make the
+// chart unusable while you watch it.
+function flRefresh() {
+  const scroller = document.querySelector('#tl-graph .fl-scroll');
+  if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+  flLoad();
 }
 
 function flLoad() {
@@ -3904,7 +4004,8 @@ function flRender() {
       <button class="fl-btn" data-zoom="in" title="zoom in (ctrl + scroll)">+</button>
     </div>
     <span class="fl-range">${escHtml(rangeLabel)}</span>
-    <span class="fl-count">${flData.sessions.length} sessions</span>
+    ${flFocused ? `<button class="fl-btn fl-clear" data-clear="1" title="show every session again">✕ focused</button>` : ''}
+    <span class="fl-count">${flFocused ? '1 of ' + flData.sessions.length : flData.sessions.length + ' sessions'}</span>
   </div>`;
 
   // Time ruler.
@@ -3922,12 +4023,17 @@ function flRender() {
   const now = Date.now();
   const nowMark = now >= from && now <= to ? `<i class="fl-now" style="left:${x(now)}px"></i>` : '';
 
+  flScale = { from, to, canvas, x };
+
   const rows = [];
-  for (const s of flData.sessions) {
+  const visible = flFocused
+    ? flData.sessions.filter(s => s.session_id === flFocused)
+    : flData.sessions;
+  for (const s of visible) {
     const st = new Date(s.started_at).getTime();
     const en = new Date(s.ended_at).getTime();
     const [bx, bw] = clampBar(st, en);
-    const open = flExpanded.has(s.session_id);
+    const open = flExpanded.has(s.session_id) || s.session_id === flFocused;
     const agents = s.agents || [];
 
     const caret = agents.length ? (open ? '▾ ' : '▸ ') : '';
@@ -3950,12 +4056,26 @@ function flRender() {
         ` data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"` +
         ` data-mark="spawn">${flMark('ic-bot')}</span>`;
     }
+    // Compactions come from the focused session's own timeline, which is
+    // already loaded for the list below. They are not fetched for every row:
+    // finding them means reading each transcript in full.
+    if (s.session_id === flFocused && tlCurrentTimeline) {
+      for (const c of (tlCurrentTimeline.events || [])) {
+        if (c.kind !== 'compact') continue;
+        const ct = new Date(c.at).getTime();
+        if (ct < from || ct > to) continue;
+        marks += `<span class="fl-mark compact" style="left:${x(ct)}px"` +
+          ` data-session="${escHtml(s.session_id)}" data-mark="compact"` +
+          ` data-detail="${escHtml(c.detail || '')}">${flMark('ic-layers')}</span>`;
+      }
+    }
     if (!s.is_running && en <= to) {
       marks += `<span class="fl-mark end" style="left:${x(en)}px"` +
         ` data-session="${escHtml(s.session_id)}" data-mark="end">${flMark('ic-flag')}</span>`;
     }
 
-    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}" data-session="${escHtml(s.session_id)}">
+    const sel = s.session_id === tlSelected ? ' sel' : '';
+    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}" data-session="${escHtml(s.session_id)}">
       <div class="fl-label" title="${escHtml((s.title || s.cwd || ''))}">
         <span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
       </div>
@@ -3969,7 +4089,7 @@ function flRender() {
     if (!open) continue;
     for (const a of agents) {
       const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
-      rows.push(`<div class="fl-row agent" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
+      rows.push(`<div class="fl-row agent${sel}" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
         <div class="fl-label agent" title="${escHtml(a.description || '')}">
           <span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span>
         </div>
@@ -4060,6 +4180,9 @@ function flBindControls(host) {
       flLoad();
     }));
 
+  const clear = host.querySelector('.fl-btn[data-clear]');
+  if (clear) clear.addEventListener('click', () => { flFocused = null; flRender(); });
+
   host.querySelectorAll('.fl-btn[data-zoom]').forEach(b =>
     b.addEventListener('click', () => {
       const how = b.dataset.zoom;
@@ -4117,7 +4240,7 @@ function flBindRows(host) {
     el.addEventListener('mouseenter', ev => {
       const s = flData.sessions.find(x => x.session_id === el.dataset.session);
       if (!s) return;
-      tip.innerHTML = flMarkTipHtml(s, el.dataset.mark, el.dataset.agent);
+      tip.innerHTML = flMarkTipHtml(s, el.dataset.mark, el.dataset.agent, el.dataset.detail);
       tip.style.display = 'block';
       flPlaceTip(ev);
     });
@@ -4140,6 +4263,9 @@ function flBindRows(host) {
         return;
       }
       const id = row.dataset.session;
+      // While focused there is only one thread on screen and its agents are
+      // always shown, so the caret has nothing to toggle.
+      if (flFocused === id) return;
       if (flExpanded.has(id)) flExpanded.delete(id); else flExpanded.add(id);
       flRender();
     });
@@ -4148,8 +4274,11 @@ function flBindRows(host) {
   host.querySelectorAll('.fl-bar').forEach(el => {
     // A bar opens the detail below: the chart says when, the list says what.
     el.addEventListener('click', () => {
-      if (el.dataset.agent) flOpenAgent(el.dataset.session, el.dataset.agent);
-      else flSelectSession(el.dataset.session);
+      if (el.dataset.agent) { flOpenAgent(el.dataset.session, el.dataset.agent); return; }
+      // Clicking a thread focuses it: the map filters to that session and its
+      // agents, and the list below loads it. Clicking it again releases.
+      flFocused = flFocused === el.dataset.session ? null : el.dataset.session;
+      flSelectSession(el.dataset.session);
     });
     el.addEventListener('mouseenter', ev => {
       const s = flData.sessions.find(x => x.session_id === el.dataset.session);
@@ -4169,6 +4298,13 @@ function flSelectSession(sessionId) {
   const sel = document.getElementById('tl-session');
   if (sel && [...sel.options].some(o => o.value === sessionId)) sel.value = sessionId;
   tlLoad(sessionId);
+  // Move the highlight without refetching: the map's data has not changed,
+  // only which row is being read.
+  if (flData) {
+    const scroller = document.querySelector('#tl-graph .fl-scroll');
+    if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+    flRender();
+  }
 }
 
 function flOpenAgent(sessionId, agentId) {
@@ -4199,7 +4335,7 @@ function flPlaceTip(ev) {
 }
 
 // Describes one marked moment.
-function flMarkTipHtml(s, mark, agentId) {
+function flMarkTipHtml(s, mark, agentId, detail) {
   const sessionStart = new Date(s.started_at);
   const fmt = t => new Date(t).toLocaleString([], {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -4221,6 +4357,13 @@ function flMarkTipHtml(s, mark, agentId) {
     return `<h4>agent spawned</h4>` +
       (a.description ? `<div class="sub">${escHtml(a.description)}</div>` : '') +
       '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+  }
+
+  if (mark === 'compact') {
+    return `<h4>context compacted</h4>` +
+      `<div class="sub">${escHtml(s.repo || '')}</div>` +
+      '<dl><dt>what</dt><dd>history summarised away</dd>' +
+      `<dt>detail</dt><dd>${escHtml(arguments[3] || '')}</dd></dl>`;
   }
 
   const isStart = mark === 'start';

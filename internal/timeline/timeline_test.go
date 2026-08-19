@@ -579,3 +579,82 @@ func contains(hay, needle string) bool {
 	}
 	return false
 }
+
+func TestCompactionBecomesAnEvent(t *testing.T) {
+	// A compact boundary is a system line with no message at all, so it has to
+	// be handled before the "skip lines without a message" rule.
+	dir, id := fixture(t, []map[string]any{
+		userMsg(at(0), "do the thing"),
+		{"type": "system", "subtype": "compact_boundary", "timestamp": at(5),
+			"content": "Conversation compacted",
+			"compactMetadata": map[string]any{
+				"trigger": "manual", "preTokens": 999157, "postTokens": 19533,
+				"cumulativeDroppedTokens": 979624, "durationMs": 162277,
+			}},
+		userMsg(at(9), "carry on"),
+	})
+	tl, err := Build(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c *Event
+	for i := range tl.Events {
+		if tl.Events[i].Kind == KindCompact {
+			c = &tl.Events[i]
+		}
+	}
+	if c == nil {
+		t.Fatalf("no compaction event: %+v", tl.Events)
+	}
+	if tl.Totals.Compactions != 1 {
+		t.Fatalf("compactions = %d, want 1", tl.Totals.Compactions)
+	}
+	for _, want := range []string{"manual", "999k", "20k", "980k"} {
+		if !contains(c.Detail, want) {
+			t.Fatalf("detail %q missing %q", c.Detail, want)
+		}
+	}
+	if !contains(c.Full, "cumulative dropped: 979624") {
+		t.Fatalf("full text missing the exact figures: %q", c.Full)
+	}
+}
+
+func TestCompactionSitsInSequenceWithTheConversation(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		userMsg(at(0), "before"),
+		{"type": "system", "subtype": "compact_boundary", "timestamp": at(5),
+			"compactMetadata": map[string]any{"trigger": "auto"}},
+		userMsg(at(9), "after"),
+	})
+	tl, _ := Build(dir, id)
+	if len(tl.Events) != 3 {
+		t.Fatalf("want 3 events, got %d", len(tl.Events))
+	}
+	if tl.Events[1].Kind != KindCompact {
+		t.Fatalf("compaction should sit between the two prompts: %+v", tl.Events)
+	}
+}
+
+func TestACompactionWithoutMetadataStillAppears(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		{"type": "system", "subtype": "compact_boundary", "timestamp": at(0)},
+	})
+	tl, _ := Build(dir, id)
+	if len(tl.Events) != 1 || tl.Events[0].Kind != KindCompact {
+		t.Fatalf("a boundary with no metadata must still be marked: %+v", tl.Events)
+	}
+}
+
+func TestHumanCountAbbreviates(t *testing.T) {
+	for in, want := range map[int]string{
+		0: "0", 999: "999", 1000: "1k", 19533: "20k", 999157: "999k",
+		// Go's %.1f rounds half to even, so 1.25 formats as 1.2 rather than
+		// 1.3. Left as-is: this is a label on a token count, not a figure
+		// anyone reconciles, and the exact number is in the expansion.
+		1_250_000: "1.2M", 1_260_000: "1.3M",
+	} {
+		if got := humanCount(in); got != want {
+			t.Errorf("humanCount(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
