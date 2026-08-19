@@ -482,7 +482,7 @@ func DiscoverAll(claudeDir string) ([]*MemoryFile, error) {
 		if !projEntry.IsDir() {
 			continue
 		}
-		projName := DecodePath(projEntry.Name())
+		projName := ResolveProjectPath(projEntry.Name())
 		projDir := filepath.Join(projectsDir, projEntry.Name())
 		files = append(files, discoverProjectMemories(projDir, projName)...)
 	}
@@ -571,6 +571,71 @@ func readMemoryFile(path, project, category string) *MemoryFile {
 }
 
 // DecodePath converts an encoded project directory name back to a filesystem path.
+// ResolveProjectPath turns an encoded ~/.claude/projects directory name back into a
+// real filesystem path.
+//
+// DecodePath alone is lossy: the encoder maps "/", "-" and "." all to "-", so any path
+// containing a hyphen (a username like "jayden-eppcohen", a repo like
+// "Fabbed-EpicAssetManager") or a dot (".epic") decodes to a directory that does not
+// exist. That silently breaks project CLAUDE.md, project rules, and brain/ discovery.
+//
+// Rather than guess at the string, this walks the real filesystem: at each level it asks
+// which child directory, once its own name is encoded the same lossy way, matches the
+// next part of the input. Falls back to DecodePath when nothing resolves, so behaviour is
+// unchanged for inputs that were never ambiguous.
+func ResolveProjectPath(encoded string) string {
+	fallback := DecodePath(encoded)
+	if len(encoded) < 2 || encoded[0] != '-' {
+		return fallback
+	}
+
+	rest := encoded[1:]
+	cur := string(filepath.Separator)
+	for rest != "" {
+		entries, err := os.ReadDir(cur)
+		if err != nil {
+			return fallback
+		}
+		matched := ""
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			enc := encodeSegment(e.Name())
+			if enc == "" || !strings.HasPrefix(rest, enc) {
+				continue
+			}
+			// A full match ends the walk; otherwise the next char must be a separator.
+			if len(rest) != len(enc) && rest[len(enc)] != '-' {
+				continue
+			}
+			// Prefer the longest match, so "Fabbed-EpicAssetManager" beats "Fabbed".
+			if len(enc) > len(matched) {
+				matched = enc
+			}
+		}
+		if matched == "" {
+			return fallback
+		}
+		// Recover the real name for this segment by re-scanning for the winner.
+		for _, e := range entries {
+			if e.IsDir() && encodeSegment(e.Name()) == matched {
+				cur = filepath.Join(cur, e.Name())
+				break
+			}
+		}
+		rest = strings.TrimPrefix(rest[len(matched):], "-")
+	}
+	return cur
+}
+
+// encodeSegment applies the same lossy mapping Claude Code uses for project directory
+// names: "-" and "." both become "-".
+func encodeSegment(name string) string {
+	r := strings.NewReplacer("-", "-", ".", "-")
+	return r.Replace(name)
+}
+
 func DecodePath(encoded string) string {
 	if len(encoded) < 2 {
 		return encoded
