@@ -479,17 +479,10 @@ tr.clickable { cursor: pointer; }
 
 /* A split thread: the replayed history is faint, and an elbow drops out of the
    parent's row at the moment the two diverged. */
-.fl-bar.inherited {
-  background:var(--text-dim); opacity:.22; height:3px; top:11px; cursor:default;
-}
-.fl-bar.inherited:hover { opacity:.35; }
-.fl-fork-link {
-  position:absolute; top:-13px; width:9px; height:21px;
-  border-left:1.5px solid var(--teal);
-  border-bottom:1.5px solid var(--teal);
-  border-bottom-left-radius:9px;
-  opacity:.75; pointer-events:none; z-index:1;
-}
+/* The join is drawn at the bars' own thickness, and overflows its row upward
+   into the parent's, so the two rows must not clip it. */
+.fl-fork-curve { position:absolute; overflow:visible; pointer-events:none; z-index:1; opacity:.9; }
+.fl-row { overflow:visible; }
 
 /* Heat view */
 .fl-legend { display:inline-flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); }
@@ -3962,6 +3955,38 @@ let flHeat = false;
 // lineage a shape instead of leaving two related rows to be spotted by their
 // timestamps. A session whose parent is outside the window keeps its own place:
 // a partial lineage still beats hiding the row.
+// The curve joining a parent's bar to its child's.
+//
+// Drawn as an SVG stroke at the bars' own thickness, so it reads as the same
+// line bending rather than a hairline pointing at two rectangles. It starts on
+// the parent's bar one curve-width before the split and lands exactly on the
+// child's bar, with no gap at either end.
+//
+// Geometry is tied to the row: bars sit FL_BAR_TOP from the top of a
+// FL_ROW_H row, so the parent's bar centre is one row above the child's.
+const FL_ROW_H = 24;
+const FL_BAR_TOP = 10;
+const FL_BAR_H = 5;
+const FL_CURVE_W = 20;
+
+function flForkCurve(child, childBarX) {
+  const parent = flData.sessions.find(x => x.session_id === (child.forked_from || {}).session_id);
+  // The parent's own colour, so the line that bends is visibly the same line.
+  const stroke = parent && parent.is_running ? 'var(--green)' : 'var(--accent)';
+  const centre = FL_BAR_H / 2;
+  const h = FL_ROW_H + FL_BAR_H;
+  const left = Math.max(0, childBarX - FL_CURVE_W);
+  const w = childBarX - left;
+  if (w <= 0) return '';
+  // From the parent's bar centre down to the child's, easing out then in so it
+  // leaves and arrives along the bars rather than crossing them at an angle.
+  const path = `M0,${centre} C${w * 0.55},${centre} ${w * 0.45},${FL_ROW_H + centre} ${w},${FL_ROW_H + centre}`;
+  return `<svg class="fl-fork-curve" style="left:${left}px;width:${w}px;height:${h}px;top:${-(FL_ROW_H - FL_BAR_TOP)}px"
+               viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+            <path d="${path}" fill="none" stroke="${stroke}" stroke-width="${FL_BAR_H}" stroke-linecap="butt"/>
+          </svg>`;
+}
+
 function flOrderByLineage(sessions) {
   const present = new Set(sessions.map(s => s.session_id));
   const kids = new Map();
@@ -4225,20 +4250,23 @@ function flRender() {
     // past and read as a duplicate. Draw the inherited stretch faintly and its
     // own work solid, with an elbow dropping out of the parent at the moment
     // they diverged — the branch as a shape, not a footnote.
+    // A split session's transcript replays its parent's history with the
+    // original timestamps, so drawing its full span makes it a duplicate of the
+    // parent rather than a branch. Draw only its own work, and join it to the
+    // parent with a curve of the same weight as the bars, peeled off the parent
+    // just before the split — one continuous line from parent into child.
     let bars = '';
     let link = '';
     const dv = s.forked_from && s.forked_from.diverged_at
       ? new Date(s.forked_from.diverged_at).getTime() : null;
     if (dv && dv > st && dv < en) {
-      const [ix, iw] = clampBar(st, dv);
       const [ox, ow] = clampBar(dv, en);
-      bars =
-        `<div class="fl-bar inherited" style="left:${ix}px;width:${iw}px"
-              data-session="${escHtml(s.session_id)}"></div>` +
-        `<div class="fl-bar session${s.is_running ? ' live' : ''}"
-              style="${flHeat ? barStyle.replace(/left:[^;]+;width:[^;]+/, `left:${ox}px;width:${ow}px`) : `left:${ox}px;width:${ow}px`}"
-              data-session="${escHtml(s.session_id)}"></div>`;
-      link = `<i class="fl-fork-link" style="left:${ox}px"></i>`;
+      const own = flHeat
+        ? barStyle.replace(/left:[^;]+;width:[^;]+/, `left:${ox}px;width:${ow}px`)
+        : `left:${ox}px;width:${ow}px`;
+      bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
+                   style="${own}" data-session="${escHtml(s.session_id)}"></div>`;
+      link = flForkCurve(s, ox);
     } else {
       bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
                    style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>`;
