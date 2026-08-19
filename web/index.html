@@ -629,6 +629,26 @@ tr.clickable { cursor: pointer; }
 }
 .fl-bar:hover { opacity:.8; }
 .fl-bar.agent { background:var(--purple); top:16px; height:3px; }
+/* A lull past the prompt cache's TTL: the session is open and the thread is
+   intact, but resuming is no longer free. Drawn as a dashed run of the same
+   colour and weight — the same line, shown to be idling, rather than a
+   different element. The dashes are a repeating gradient rather than a border
+   so the bar keeps its exact height and radius. */
+.fl-bar.idle {
+  background:repeating-linear-gradient(90deg,
+    var(--accent) 0 5px, transparent 5px 10px);
+  opacity:.5; border-radius:0;
+}
+.fl-bar.idle.live {
+  background:repeating-linear-gradient(90deg,
+    var(--green) 0 5px, transparent 5px 10px);
+}
+/* In heat view the segment's own background is the reading, so the dashes are
+   cut out of it with a mask instead of painted over it. */
+.fl-row.heat .fl-bar.idle {
+  -webkit-mask:repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 10px);
+  mask:repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 10px);
+}
 .fl-bar.live { background:var(--green); }
 
 /* The ruler is its own row so labels are not repeated per lane. */
@@ -4432,7 +4452,6 @@ function flRender() {
   for (const s of visible) {
     const st = new Date(s.started_at).getTime();
     const en = new Date(s.ended_at).getTime();
-    const [bx, bw] = clampBar(st, en);
     const open = flExpanded.has(s.session_id) || s.session_id === flFocused;
     const agents = s.agents || [];
 
@@ -4499,10 +4518,6 @@ function flRender() {
     // Heat keeps the bars' own geometry — it is a colour reading, not a
     // different chart, and a thicker bar in heat mode made the two views hard
     // to compare.
-    let barStyle = `left:${bx}px;width:${bw}px`;
-    if (flHeat) {
-      barStyle += `;background:${flHeatGradient(s, peak)};opacity:1`;
-    }
     // A split session's transcript replays its parent's history with the
     // original timestamps, so its bar would otherwise span the parent's whole
     // past and read as a duplicate. Draw the inherited stretch faintly and its
@@ -4513,6 +4528,38 @@ function flRender() {
     // parent rather than a branch. Draw only its own work, and join it to the
     // parent with a curve of the same weight as the bars, peeled off the parent
     // just before the split — one continuous line from parent into child.
+    // A session's bar is drawn from its activity spans when they are known:
+    // work solid, cache-cold lulls dashed, and the absences between them left
+    // undrawn so the line breaks where the session was put down and resumes
+    // where it was picked back up. Falling back to one bar when spans are
+    // absent keeps the chart working for a session whose transcript could not
+    // be read.
+    const flSeg = (fromMs, toMs, extraStyle) => {
+      const spans = (s.spans || []).filter(sp => new Date(sp.to).getTime() > fromMs);
+      if (!spans.length) {
+        const [px, pw] = clampBar(fromMs, toMs);
+        return `<div class="fl-bar session${s.is_running ? ' live' : ''}"
+                     style="left:${px}px;width:${pw}px${extraStyle}"
+                     data-session="${escHtml(s.session_id)}"></div>`;
+      }
+      let out = '';
+      for (const sp of spans) {
+        // Clip to the drawn stretch: a fork's own work starts at the
+        // divergence, and a span straddling it must not be drawn back into
+        // the parent's history.
+        const a = Math.max(fromMs, new Date(sp.from).getTime());
+        const b = Math.min(toMs, new Date(sp.to).getTime());
+        if (b < a) continue;
+        const [px, pw] = clampBar(a, b);
+        const cls = sp.kind === 'idle' ? ' idle' : '';
+        out += `<div class="fl-bar session${s.is_running ? ' live' : ''}${cls}"
+                     style="left:${px}px;width:${pw}px${extraStyle}"
+                     data-session="${escHtml(s.session_id)}"
+                     data-span="${escHtml(sp.kind)}"></div>`;
+      }
+      return out;
+    };
+
     let bars = '';
     let link = '';
     const dv = s.forked_from && s.forked_from.diverged_at
@@ -4528,12 +4575,12 @@ function flRender() {
         forkColor = flHeatAt(parent, peak, dv);
         own += `;background:${flHeatGradient(s, peak)};opacity:1`;
       }
-      bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
-                   style="${own}" data-session="${escHtml(s.session_id)}"></div>`;
+      // The heat gradient is positioned against the whole bar, so it is
+      // carried onto every segment rather than restarting on each one.
+      bars = flSeg(dv, en, flHeat ? `;background:${flHeatGradient(s, peak)};opacity:1` : '');
       link = flForkCurve(s, ox, clampBar, forkColor);
     } else {
-      bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
-                   style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>`;
+      bars = flSeg(st, en, flHeat ? `;background:${flHeatGradient(s, peak)};opacity:1` : '');
     }
 
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}" data-session="${escHtml(s.session_id)}">
@@ -4955,6 +5002,23 @@ function flTipHtml(s, agent) {
   if (!agent && s.model) rows.push(['model', shortModel(s.model)]);
   rows.push(['started', start.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })]);
   rows.push(['ran for', fmtDur(end - start) || '—']);
+  // "ran for" is wall-clock from first event to last, which for a session left
+  // open overnight is mostly absence. Say how much of it was actually work,
+  // and how the rest broke down — that is what the dashes and gaps in the bar
+  // are showing.
+  if (!agent && (s.spans || []).length) {
+    const ms = k => (s.spans || [])
+      .filter(x => x.kind === k)
+      .reduce((t, x) => t + (new Date(x.to) - new Date(x.from)), 0);
+    const active = ms('active');
+    const idle = ms('idle');
+    const breaks = (s.spans || []).length
+      ? (end - start) - active - idle
+      : 0;
+    if (active > 0) rows.push(['working', fmtDur(active)]);
+    if (idle > 0) rows.push(['cache cold', fmtDur(idle)]);
+    if (breaks > 60000) rows.push(['away', fmtDur(breaks)]);
+  }
   if (agent) {
     if (agent.spawn_depth) rows.push(['depth', agent.spawn_depth]);
     // Spawn offset answers "how far into the session did this start", which is

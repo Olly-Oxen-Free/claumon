@@ -60,8 +60,14 @@ type FleetSession struct {
 	// Burn is tokens per equal time bucket across the session's span, filled
 	// only when the caller asks for heat data. It is what lets a bar be shaded
 	// along its length instead of averaged to one colour.
-	Burn      []int `json:"burn,omitempty"`
-	IsRunning bool  `json:"is_running"`
+	Burn []int `json:"burn,omitempty"`
+	// Spans is the session's life broken into what was actually happening:
+	// stretches of work, lulls past the cache TTL, and — as the gaps between
+	// them — the absences where the session was put down and picked back up.
+	// A bar drawn from Spans says when work happened; one drawn from
+	// StartedAt to EndedAt only says the session existed.
+	Spans     []Span `json:"spans,omitempty"`
+	IsRunning bool   `json:"is_running"`
 
 	Agents []FleetAgent `json:"agents,omitempty"`
 
@@ -237,6 +243,20 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 				fs.Title = h.Title
 			}
 		}
+		// Spans are computed after herdr has had its say: whether a session is
+		// still open decides whether its quiet tail is drawn as an idle
+		// stretch, and herdr's view of that beats the mtime inference.
+		if path != "" {
+			// A running session's idle tail runs to now, not to the window's
+			// far edge — a week-wide window would otherwise draw a dashed
+			// stretch days into the future.
+			tail := to
+			if now := time.Now().UTC(); now.Before(tail) {
+				tail = now
+			}
+			fs.Spans = Activity(path, tail, fs.IsRunning)
+		}
+
 		// A session's own title falls back to its first user message, which
 		// for a session resumed from a local command is the harness's caveat
 		// preamble rather than anything the user said. That text is identical
