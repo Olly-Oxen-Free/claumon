@@ -175,6 +175,34 @@ Two detectors, for the two ways an agent session goes wrong quietly:
 
 Findings are logged and served at `GET /api/anomalies`.
 
+### Session timeline
+
+A **Timeline** tab showing what a session actually did: prompts, replies, tool calls
+with how long each took, and the subagents it spawned — with cost attributed per step.
+
+claumon's session parser answers "what did this session cost". It merges tool results
+into the assistant message that requested them, which is right for a cost summary and
+wrong for a timeline: the merge discards the result's timestamp, and that difference
+*is* the tool call's duration. So `internal/timeline` reads the transcript itself,
+routing cost through the same pricing table so there is one implementation of it.
+
+Subagents live in their own files — a session's transcript at
+`<project>/<session>.jsonl`, each spawned agent at
+`<project>/<session>/subagents/agent-<id>.jsonl` with a sibling `.meta.json` naming
+its type, its task, and the `toolUseId` of the parent's `Task` call. That id is what
+makes exact nesting possible: agents fold into the Task call that spawned them rather
+than being matched by position. An agent whose meta is missing still appears, so a
+spawned agent is never silently dropped.
+
+Subagent rows expand in place, fetching that agent's own events on demand — a session
+can spawn dozens, and loading them all up front would make the first paint useless.
+
+Served at `GET /api/timeline/{session_id}` and
+`GET /api/timeline/{session_id}/agents/{agent_id}`.
+
+Note on the "tool time" total: parallel calls are each counted in full, so it measures
+work performed, not elapsed wall clock, and legitimately exceeds a session's duration.
+
 ### OpenTelemetry export
 
 Pushes utilization, projected utilization, burn rate, and live session counts to an

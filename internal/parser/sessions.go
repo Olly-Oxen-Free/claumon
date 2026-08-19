@@ -197,6 +197,15 @@ func estimateCost(s *SessionSummary) float64 {
 	return math.Round(cost*10000) / 10000
 }
 
+// MessageCostUSD returns the USD cost of one message's token mix.
+//
+// Exported so other packages (the timeline) attribute cost through the same
+// pricing table and model normalization the session summaries use; a second
+// implementation would drift.
+func MessageCostUSD(model string, in, out, cacheRead, cacheCreate int) float64 {
+	return costFor(model, in, out, cacheRead, cacheCreate)
+}
+
 // costFor returns the unrounded USD cost for the given token mix under the
 // given model's pricing. Returns 0 if pricing is unavailable.
 func costFor(model string, in, out, cacheRead, cacheCreate int) float64 {

@@ -15,6 +15,7 @@ import (
 	"github.com/fabioconcina/claumon/internal/memory"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
+	"github.com/fabioconcina/claumon/internal/timeline"
 )
 
 type Handlers struct {
@@ -560,4 +561,35 @@ func (h *Handlers) HandleAnomalies(w http.ResponseWriter, r *http.Request) {
 		"findings": findings,
 		"count":    len(findings),
 	})
+}
+
+// HandleTimeline returns one session's event stream: prompts, replies, tool
+// calls with durations, and the subagents it spawned.
+func (h *Handlers) HandleTimeline(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSONError(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	tl, err := timeline.Build(h.claudeDir, id)
+	if err != nil {
+		writeJSONError(w, "session not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, tl)
+}
+
+// HandleAgentTimeline returns one spawned subagent's own event stream.
+func (h *Handlers) HandleAgentTimeline(w http.ResponseWriter, r *http.Request) {
+	id, agentID := r.PathValue("id"), r.PathValue("agent")
+	if id == "" || agentID == "" {
+		writeJSONError(w, "missing session or agent id", http.StatusBadRequest)
+		return
+	}
+	tl, err := timeline.BuildAgent(h.claudeDir, id, agentID)
+	if err != nil {
+		writeJSONError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, tl)
 }

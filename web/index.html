@@ -436,6 +436,41 @@ tr.clickable { cursor: pointer; }
 }
 .backdrop.open { display: block; }
 
+/* Timeline tab */
+.tl-controls { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+.tl-controls select {
+  background:var(--card); color:var(--text); border:1px solid var(--border);
+  border-radius:6px; padding:6px 10px; font-size:13px; max-width:520px;
+}
+.tl-totals { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:16px; }
+.tl-total { display:flex; flex-direction:column; gap:2px; }
+.tl-total .v { font-size:18px; font-weight:600; }
+.tl-total .k { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; }
+.tl-list { display:flex; flex-direction:column; }
+.tl-row {
+  display:grid; grid-template-columns:64px 20px 1fr auto auto;
+  gap:10px; align-items:baseline; padding:6px 8px;
+  border-left:2px solid var(--border); font-size:13px;
+}
+.tl-row + .tl-row { border-top:1px solid var(--border); }
+.tl-row.tool { border-left-color:var(--accent); }
+.tl-row.subagent { border-left-color:#a78bfa; cursor:pointer; }
+.tl-row.subagent:hover { background:rgba(167,139,250,.08); }
+.tl-row.err { border-left-color:var(--danger, #f87171); }
+.tl-row.prompt { border-left-color:#60a5fa; }
+.tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; }
+.tl-glyph { text-align:center; }
+.tl-title { font-weight:600; }
+.tl-detail {
+  color:var(--text-dim); font-family:ui-monospace,monospace; font-size:12px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.tl-dur, .tl-cost { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:12px; white-space:nowrap; }
+.tl-dur.slow { color:var(--warn, #fbbf24); }
+.tl-children { margin-left:24px; border-left:2px dashed #a78bfa; padding-left:8px; }
+.tl-empty { color:var(--text-dim); padding:24px; text-align:center; }
+.tl-live { font-size:11px; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,.15); color:#4ade80; }
+
 /* Memories tab */
 .memories-search { margin-bottom: 20px; }
 .memories-search input {
@@ -949,6 +984,7 @@ tr.clickable { cursor: pointer; }
   <div class="tab active" data-tab="dashboard">Dashboard</div>
   <div class="tab" data-tab="memories">Memories <span id="staleness-badge" class="tab-badge" style="display:none">0</span></div>
   <div class="tab" data-tab="graph">Graph</div>
+  <div class="tab" data-tab="timeline">Timeline</div>
 </div>
 
 <div class="content">
@@ -1107,6 +1143,18 @@ tr.clickable { cursor: pointer; }
     <div id="graph-tooltip" class="graph-tooltip"></div>
     <div id="graph-legend" class="graph-legend"></div>
   </div>
+
+  <!-- Timeline Tab -->
+  <div class="tab-content" id="tab-timeline">
+    <div class="tl-controls">
+      <select id="tl-session"></select>
+      <span id="tl-live"></span>
+    </div>
+    <div class="tl-totals" id="tl-totals"></div>
+    <div class="tl-list" id="tl-list">
+      <div class="tl-empty">Pick a session to see what it did.</div>
+    </div>
+  </div>
 </div>
 
 <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
@@ -1142,6 +1190,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     // Re-render graph when switching to its tab (needs visible width)
     if (tab.dataset.tab === 'graph' && graphData) renderGraphView();
+    if (tab.dataset.tab === 'timeline') tlActivate();
   });
 });
 
@@ -1786,14 +1835,15 @@ document.addEventListener('keydown', e => {
   // Ignore shortcuts when typing in an input
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  const tabs = ['dashboard', 'memories', 'graph'];
-  const tabIndex = { '1': 0, '2': 1, '3': 2 }[e.key];
+  const tabs = ['dashboard', 'memories', 'graph', 'timeline'];
+  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key];
   if (tabIndex !== undefined) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.querySelector(`.tab[data-tab="${tabs[tabIndex]}"]`).classList.add('active');
     document.getElementById('tab-' + tabs[tabIndex]).classList.add('active');
     if (tabs[tabIndex] === 'graph' && graphData) renderGraphView();
+    if (tabs[tabIndex] === 'timeline') tlActivate();
     return;
   }
 
@@ -3226,6 +3276,189 @@ function fcFmtClock(ms) {
   const dt = new Date(ms);
   return String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
 }
+
+// --- Timeline tab ---------------------------------------------------------
+// Shows what a session actually did: prompts, replies, tool calls with how
+// long each took, and the subagents it spawned. Subagent rows expand in place
+// rather than navigating away, so the parent's ordering stays readable.
+let tlLoaded = false;
+let tlSessions = [];
+const tlExpanded = new Set();
+
+function fmtDur(ms) {
+  if (!ms) return '';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  const m = Math.floor(ms / 60000);
+  const sec = Math.round((ms % 60000) / 1000);
+  if (m < 60) return m + 'm ' + sec + 's';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+function fmtCostSmall(v) {
+  if (!v) return '';
+  return v < 0.01 ? '<$0.01' : '$' + v.toFixed(2);
+}
+
+const TL_GLYPH = { prompt: '›', message: '◆', tool: '⚙', subagent: '⑂' };
+
+function tlLoadSessions() {
+  return fetch('/api/sessions?range=all&limit=100')
+    .then(r => r.json())
+    .then(data => {
+      tlSessions = (data.sessions || data || []).slice();
+      tlSessions.sort((a, b) => new Date(b.last_activity) - new Date(a.last_activity));
+      const sel = document.getElementById('tl-session');
+      if (!tlSessions.length) {
+        sel.innerHTML = '<option value="">No sessions found</option>';
+        return;
+      }
+      sel.innerHTML = tlSessions.map(x => {
+        const when = fmtTimeAgo(x.last_activity);
+        return `<option value="${escHtml(x.id)}">${escHtml(shortProject(x.project || x.cwd))} — ${escHtml(when)}</option>`;
+      }).join('');
+      tlLoad(tlSessions[0].id);
+    })
+    .catch(() => {
+      document.getElementById('tl-list').innerHTML =
+        '<div class="tl-empty">Could not load sessions.</div>';
+    });
+}
+
+function tlLoad(sessionId) {
+  if (!sessionId) return;
+  tlExpanded.clear();
+  const list = document.getElementById('tl-list');
+  list.innerHTML = '<div class="tl-empty">Reading transcript…</div>';
+
+  fetch('/api/timeline/' + encodeURIComponent(sessionId))
+    .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
+    .then(tl => {
+      tlRenderTotals(tl.totals);
+      tlRenderEvents(tl, sessionId);
+      tlRenderLive(sessionId);
+    })
+    .catch(() => {
+      document.getElementById('tl-totals').innerHTML = '';
+      list.innerHTML = '<div class="tl-empty">No transcript for that session.</div>';
+    });
+}
+
+function tlRenderTotals(t) {
+  if (!t) { document.getElementById('tl-totals').innerHTML = ''; return; }
+  const cells = [
+    ['events', t.events],
+    ['tools', t.tool_calls],
+    ['subagents', t.subagents],
+    ['errors', t.errors],
+    ['cost', '$' + (t.cost_usd || 0).toFixed(2)],
+    // Parallel calls each count in full, so this is work done, not elapsed.
+    ['tool time', fmtDur(t.tool_ms) || '0s'],
+  ];
+  document.getElementById('tl-totals').innerHTML = cells.map(([k, v]) =>
+    `<div class="tl-total"><span class="v">${escHtml(String(v))}</span><span class="k">${k}</span></div>`
+  ).join('');
+}
+
+// A tool call this slow is worth the eye going to it.
+const TL_SLOW_MS = 30000;
+
+function tlEventRow(e, sessionId) {
+  const cls = ['tl-row', e.kind];
+  if (e.is_error) cls.push('err');
+  const time = e.at ? new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+  const dur = fmtDur(e.duration_ms);
+  const durCls = e.duration_ms >= TL_SLOW_MS ? 'tl-dur slow' : 'tl-dur';
+
+  let title = e.title || '';
+  let attrs = '';
+  if (e.kind === 'subagent' && e.agent) {
+    const open = tlExpanded.has(e.agent.agent_id);
+    title = (open ? '▾ ' : '▸ ') + title;
+    attrs = ` data-agent="${escHtml(e.agent.agent_id)}" data-session="${escHtml(sessionId)}"`;
+    title += ` <span class="tl-detail">${e.agent.tool_calls} tools</span>`;
+  }
+
+  return `<div class="${cls.join(' ')}"${attrs}>
+    <span class="tl-time">${escHtml(time)}</span>
+    <span class="tl-glyph">${TL_GLYPH[e.kind] || '·'}</span>
+    <span><span class="tl-title">${title}</span> <span class="tl-detail">${escHtml(e.detail || '')}</span></span>
+    <span class="${durCls}">${escHtml(dur)}</span>
+    <span class="tl-cost">${escHtml(fmtCostSmall(e.cost_usd || (e.agent && e.agent.cost_usd) || 0))}</span>
+  </div>` + (e.kind === 'subagent' && e.agent
+    ? `<div class="tl-children" id="tl-agent-${escHtml(e.agent.agent_id)}" style="display:none"></div>`
+    : '');
+}
+
+function tlRenderEvents(tl, sessionId) {
+  const list = document.getElementById('tl-list');
+  if (!tl.events || !tl.events.length) {
+    list.innerHTML = '<div class="tl-empty">That session has no recorded activity.</div>';
+    return;
+  }
+  list.innerHTML = tl.events.map(e => tlEventRow(e, sessionId)).join('');
+}
+
+// Marks the selected session live when the hooks report it running.
+function tlRenderLive(sessionId) {
+  const el = document.getElementById('tl-live');
+  el.innerHTML = '';
+  fetch('/api/live').then(r => r.json()).then(d => {
+    const s = (d.sessions || []).find(x => x.session_id === sessionId);
+    if (!s) return;
+    const label = s.label ? `${s.status} · ${s.label}` : s.status;
+    el.innerHTML = `<span class="tl-live">${escHtml(label)}</span>`;
+  }).catch(() => {});
+}
+
+// Subagent rows expand in place. Their events are fetched on demand: a session
+// can spawn dozens of agents, and loading every one up front would make the
+// first paint useless.
+document.getElementById('tl-list').addEventListener('click', ev => {
+  const row = ev.target.closest('.tl-row.subagent');
+  if (!row) return;
+  const agentId = row.dataset.agent;
+  const sessionId = row.dataset.session;
+  if (!agentId) return;
+
+  const box = document.getElementById('tl-agent-' + agentId);
+  if (!box) return;
+
+  if (tlExpanded.has(agentId)) {
+    tlExpanded.delete(agentId);
+    box.style.display = 'none';
+    row.querySelector('.tl-title').innerHTML =
+      row.querySelector('.tl-title').innerHTML.replace('▾', '▸');
+    return;
+  }
+
+  tlExpanded.add(agentId);
+  box.style.display = 'block';
+  row.querySelector('.tl-title').innerHTML =
+    row.querySelector('.tl-title').innerHTML.replace('▸', '▾');
+
+  if (box.dataset.loaded) return;
+  box.innerHTML = '<div class="tl-empty">Reading agent transcript…</div>';
+  fetch(`/api/timeline/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}`)
+    .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
+    .then(sub => {
+      box.dataset.loaded = '1';
+      box.innerHTML = (sub.events || []).map(e => tlEventRow(e, sessionId)).join('') ||
+        '<div class="tl-empty">This agent recorded nothing.</div>';
+    })
+    .catch(() => { box.innerHTML = '<div class="tl-empty">Could not load that agent.</div>'; });
+});
+
+document.getElementById('tl-session').addEventListener('change', e => tlLoad(e.target.value));
+
+// Loaded on first visit rather than at startup: parsing a transcript is real
+// work, and most visits never open this tab.
+function tlActivate() {
+  if (tlLoaded) return;
+  tlLoaded = true;
+  tlLoadSessions();
+}
+
 </script>
 </body>
 </html>
