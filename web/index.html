@@ -511,7 +511,7 @@ tr.clickable { cursor: pointer; }
    reads against the span behind it and stays legible where bars overlap.
    Centred on the row rather than the bar's top edge. */
 .fl-mark {
-  position:absolute; top:4px; transform:translateX(-50%); z-index:3;
+  position:absolute; top:9px; transform:translateX(-50%); z-index:3;
   width:16px; height:16px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   background:var(--bg-surface); border:1px solid currentColor;
@@ -532,13 +532,9 @@ tr.clickable { cursor: pointer; }
 
 .fl-zoomlabel { min-width:38px; font-family:ui-monospace,monospace; }
 
-.fl-pane {
-  background:none; border:1px solid var(--border); border-radius:4px;
-  color:var(--teal); font-family:ui-monospace,monospace; font-size:9.5px;
-  padding:0 4px; cursor:pointer; line-height:14px;
-}
-.fl-pane:hover { border-color:var(--teal); color:var(--text-bright); }
-.fl-pane.failed { border-color:var(--red); color:var(--red); }
+.fl-herdric { cursor:pointer; }
+.fl-herdric:hover { color:var(--text-bright); }
+.fl-herdric.failed { color:var(--red); }
 
 /* Fleet gantt */
 .fl-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
@@ -553,7 +549,7 @@ tr.clickable { cursor: pointer; }
 .fl-count { margin-left:auto; }
 
 .fl-scroll {
-  overflow-x:auto; overflow-y:auto; max-height:460px;
+  overflow-x:auto; overflow-y:auto; max-height:560px;
   border:1px solid var(--border); border-radius:6px; background:var(--bg-surface);
   /* Keep the horizontal scrollbar visible rather than overlay-on-hover: it is
      the only cue that there is more timeline off to the side. */
@@ -565,42 +561,74 @@ tr.clickable { cursor: pointer; }
    from the parent, so an auto-sized canvas collapses to the viewport and the
    tracks overflow invisibly instead of making the container scroll. */
 .fl-canvas { width:max-content; min-width:100%; }
-.fl-row { display:flex; align-items:center; height:24px; }
+.fl-row { display:flex; align-items:center; height:34px; }
 .fl-row + .fl-row { border-top:1px solid var(--border); }
 .fl-row:hover { background:rgba(127,127,127,.06); }
+/* Two rows: what the work is, then where it happened. The width is a custom
+   property so the drag handle can change it without touching every rule that
+   depends on it. */
 .fl-label {
-  position:sticky; left:0; z-index:2; flex:0 0 300px; width:300px;
-  display:flex; gap:6px; align-items:baseline; padding:0 8px; height:24px; line-height:24px;
+  position:sticky; left:0; z-index:6;
+  flex:0 0 var(--fl-label-w); width:var(--fl-label-w);
+  display:flex; flex-direction:column; justify-content:center; gap:1px;
+  padding:0 10px 0 8px; height:34px;
   background:var(--bg-surface); border-right:1px solid var(--border);
   font-size:11px; cursor:pointer; overflow:hidden;
 }
+.fl-l1 { display:flex; gap:5px; align-items:center; line-height:14px; overflow:hidden; }
+.fl-l2 { display:flex; gap:5px; align-items:center; line-height:12px; overflow:hidden; }
 .fl-row:hover .fl-label { background:var(--bg-hover); }
 .fl-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1 1 auto; min-width:0; }
+/* A session herdr is running takes herdr's own colour, so "live in a pane" is
+   read from the title itself rather than from a separate chip. */
+.fl-name.herdr { color:var(--teal); }
+.fl-herdric { width:11px; height:11px; flex:0 0 11px; color:var(--teal); }
+.fl-herdric use { fill:currentColor; stroke:none; }
 /* Where the work happened, under the name of the work. Dim and shrinkable:
    when the label runs out of room the location gives way before the task
    name does, because two rows in one repo are told apart by their names. */
+/* The location line, dimmer than the name above it: present when wanted,
+   never competing with the row's identity. */
 .fl-ctx {
   color:var(--text-dim); font-size:10px; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; flex:1 1 auto; min-width:0;
+  opacity:.72;
 }
 /* A worktree name is the one part of the location that distinguishes
    otherwise identical rows, so it is the part that keeps its colour. */
 .fl-wt { color:var(--purple); }
-.fl-when { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:10px; margin-left:auto; }
+.fl-when { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:10px; margin-left:auto; flex:0 0 auto; }
 .fl-label.agent { padding-left:22px; }
 .fl-label.agent .fl-name { color:var(--purple); }
-.fl-track { position:relative; height:24px; flex:0 0 auto; }
+/* Drag handle on the label column's right edge. Sits inside the sticky label
+   so it travels with it during horizontal scroll, and is wider than the border
+   it straddles so it can actually be grabbed. */
+.fl-grip {
+  position:absolute; top:0; right:-3px; width:7px; height:100%;
+  cursor:col-resize; z-index:7;
+}
+.fl-grip::after {
+  content:""; position:absolute; left:3px; top:0; width:1px; height:100%;
+  background:var(--teal); opacity:0; transition:opacity .12s;
+}
+.fl-grip:hover::after, .fl-canvas.resizing .fl-grip::after { opacity:.8; }
+/* While dragging, the pointer owns the gesture: text selection and row hover
+   highlights would otherwise fire on every move. */
+.fl-canvas.resizing { user-select:none; }
+.fl-canvas.resizing .fl-row:hover { background:none; }
+
+.fl-track { position:relative; height:34px; flex:0 0 auto; }
 .fl-tick { display:none; }
 .fl-grid { position:absolute; top:0; bottom:0; width:1px; background:var(--border); opacity:.5; }
 .fl-now { position:absolute; top:0; bottom:0; width:1px; background:var(--green); opacity:.8; }
 /* A span is context, not the subject: thin and low-contrast so the markers
    sitting on it are what the eye lands on. */
 .fl-bar {
-  position:absolute; top:10px; height:5px; border-radius:3px; cursor:pointer;
+  position:absolute; top:15px; height:5px; border-radius:3px; cursor:pointer;
   background:var(--accent); opacity:.45; min-width:3px; z-index:1;
 }
 .fl-bar:hover { opacity:.8; }
-.fl-bar.agent { background:var(--purple); top:11px; height:3px; }
+.fl-bar.agent { background:var(--purple); top:16px; height:3px; }
 .fl-bar.live { background:var(--green); }
 
 /* The ruler is its own row so labels are not repeated per lane. */
@@ -1270,6 +1298,17 @@ tr.clickable { cursor: pointer; }
   <g id="ic-arrow-down"><path d="M8 3v10M4 9l4 4 4-4"/></g>
   <g id="ic-layers"><path d="M8 2 2 5l6 3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>
   <g id="ic-flag"><path d="M4 14V2h8l-2 3 2 3H4"/></g>
+  <!-- herdr's own mark, the same artwork the scratchpad dock renders from
+       ~/.local/share/icons/herdr.svg. A symbol rather than a group, because
+       the artwork carries its own viewBox and a <use> of a group would be
+       drawn at the sprite's 16x16 scale instead of its own. Filled with
+       currentColor so it takes the row's colour. -->
+  <symbol id="ic-herdr" viewBox="125 96 240 240">
+    <clipPath id="herdr-head" clipPathUnits="userSpaceOnUse"><ellipse cx="245" cy="196" rx="130" ry="110"/></clipPath>
+    <g clip-path="url(#herdr-head)"><g fill="currentColor" transform="translate(0 512) scale(.1 -.1)" stroke="none">
+          <path d="M2794 3710 c-129 -33 -299 -135 -359 -214 -21 -28 -26 -42 -21 -63 9 -38 154 -178 199 -192 32 -11 41 -9 104 23 171 86 354 70 475 -43 150 -138 150 -379 0 -511 -107 -95 -278 -94 -386 2 l-46 40 -11 -29 c-16 -40 -14 -122 4 -164 60 -144 264 -222 452 -174 360 92 559 494 430 868 -36 103 -81 173 -175 267 -71 72 -100 93 -180 132 -52 26 -127 54 -167 62 -96 21 -230 20 -319 -4z M2183 3695 c-116 -32 -221 -108 -273 -199 -17 -28 -30 -54 -30 -58 0 -4 20 1 45 12 66 28 220 68 294 76 64 7 65 7 137 83 40 41 71 77 69 79 -2 2 -21 8 -42 13 -55 12 -140 10 -200 -6z M2212 3388 c-159 -22 -390 -122 -559 -241 -299 -210 -585 -600 -609 -828 -12 -118 40 -251 125 -318 96 -76 178 -98 426 -116 110 -8 224 -21 254 -29 125 -34 230 -115 272 -211 11 -24 24 -81 30 -127 20 -170 65 -271 166 -374 34 -35 63 -65 63 -67 0 -1 -10 -27 -22 -57 -29 -76 -37 -259 -14 -350 42 -170 158 -318 311 -397 44 -23 98 -46 120 -52 22 -6 45 -14 51 -18 5 -5 15 -48 22 -96 6 -48 14 -92 17 -97 4 -6 415 -10 1131 -10 l1124 0 0 1584 0 1585 -55 -19 c-84 -29 -143 -68 -232 -154 l-83 -78 -54 49 c-111 102 -233 151 -391 160 -113 6 -199 -10 -298 -54 l-60 -27 -26 34 c-37 51 -120 134 -127 128 -3 -4 0 -34 7 -67 17 -89 7 -268 -21 -356 -103 -328 -377 -545 -688 -545 -161 0 -273 41 -373 137 -37 35 -66 75 -85 116 -79 173 -8 407 124 407 44 0 68 -14 117 -66 74 -78 167 -82 238 -9 60 62 72 147 33 231 -42 90 -120 130 -238 122 -50 -4 -85 -14 -131 -37 -89 -45 -122 -52 -176 -40 -92 20 -262 163 -302 253 -11 25 -21 45 -22 45 -1 -1 -30 -6 -65 -11z m-256 -505 c115 -88 129 -102 132 -131 2 -18 -2 -40 -9 -49 -7 -8 -69 -55 -138 -105 -103 -73 -130 -88 -151 -83 -35 8 -51 34 -48 74 3 31 12 42 83 92 44 31 80 61 82 66 1 4 -30 31 -69 58 -39 28 -77 56 -85 63 -18 19 -16 72 4 94 32 35 63 23 199 -79z m528 -88 c23 -24 28 -52 14 -82 l-13 -28 -141 -3 c-130 -2 -142 -1 -158 17 -23 26 -24 66 -1 91 16 18 32 20 151 20 105 0 136 -3 148 -15z"/>
+    </g></g>
+  </symbol>
   <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
 </defs></svg>
 <div class="tabs">
@@ -3983,7 +4022,32 @@ const FL_WINDOWS = [
   { key: '1w', label: '1 week',  pxPerHour: 22,  tick: 12 * 3600 * 1000 },
 ];
 
-const FL_LABEL_PX = 300;
+// The label column's width is the user's to set — a row's name can be a long
+// prompt or a short repo, and only they know which they are reading for. Kept
+// in localStorage so a drag survives a reload, and clamped so it can be neither
+// dragged shut nor grown until the chart has nowhere left to draw.
+const FL_LABEL_MIN = 140;
+const FL_LABEL_MAX = 620;
+const FL_LABEL_DEFAULT = 300;
+
+// Applied once at load so the stored width is in force for the first render
+// rather than only after the first drag.
+function flInitLabelW() {
+  document.documentElement.style.setProperty('--fl-label-w', flLabelW() + 'px');
+}
+
+function flLabelW() {
+  const v = Number(localStorage.getItem('claumon.fl.labelw'));
+  if (!v || !isFinite(v)) return FL_LABEL_DEFAULT;
+  return Math.min(FL_LABEL_MAX, Math.max(FL_LABEL_MIN, v));
+}
+
+function flSetLabelW(px) {
+  const v = Math.min(FL_LABEL_MAX, Math.max(FL_LABEL_MIN, Math.round(px)));
+  localStorage.setItem('claumon.fl.labelw', String(v));
+  document.documentElement.style.setProperty('--fl-label-w', v + 'px');
+  return v;
+}
 
 let flWindow = '1d';
 let flEnd = null;            // null means "now", refreshed on each render
@@ -4026,8 +4090,8 @@ let flHeat = false;
 //
 // Geometry is tied to the row: bars sit FL_BAR_TOP from the top of a
 // FL_ROW_H row, so the parent's bar centre is one row above the child's.
-const FL_ROW_H = 24;
-const FL_BAR_TOP = 10;
+const FL_ROW_H = 34;
+const FL_BAR_TOP = 15;
 const FL_BAR_H = 5;
 const FL_CURVE_W = 20;
 
@@ -4272,6 +4336,10 @@ function flRender() {
   const host = document.getElementById('tl-graph');
   if (!flData) return;
 
+  // Cheap and idempotent: guarantees the stored column width is in force even
+  // on the very first render, without needing a load hook of its own.
+  flInitLabelW();
+
   const spec = flSpec();
   const from = new Date(flData.from).getTime();
   const to = new Date(flData.to).getTime();
@@ -4279,7 +4347,7 @@ function flRender() {
   // The scale is fixed per window rather than fitted, so the same duration is
   // the same width whatever else is on screen.
   const hours = (to - from) / 3600000;
-  const avail = Math.max(320, host.clientWidth - FL_LABEL_PX - 26);
+  const avail = Math.max(320, host.clientWidth - flLabelW() - 26);
   // The window sets the base scale; zoom multiplies it. The fit-to-viewport
   // floor only applies at 1x or below, so zooming in is never undone by it.
   const scaled = Math.round(hours * spec.pxPerHour * flZoom);
@@ -4376,21 +4444,23 @@ function flRender() {
     const label = `${caret}${name}${agents.length ? ` · ${agents.length}` : ''}`;
     // The location goes underneath as context. It is dropped when it would
     // only repeat the name.
-    let ctx = '';
-    if (s.worktree) {
-      ctx = `${escHtml(s.repo || '')}<span class="fl-wt"> ⑂ ${escHtml(s.worktree)}</span>`;
-    } else if (s.title && s.repo) {
-      ctx = escHtml(s.repo);
-    }
+    let ctx = escHtml(s.repo || '');
+    if (s.worktree) ctx += `<span class="fl-wt"> ⑂ ${escHtml(s.worktree)}</span>`;
     const forkIcon = s.forked_from
       ? `<svg class="ev-ic fl-forkic" viewBox="0 0 16 16" title="split from another session"><use href="#ic-fork"/></svg>`
       : '';
     const indent = (s._depth || 0) * 12;
     // The pane badge is the herdr join made useful: it names where the session
     // is running and clicking it puts that pane in front of you.
-    const meta = s.herdr
-      ? `<button class="fl-pane" data-pane="${escHtml(s.herdr.pane_id)}" title="focus ${escHtml(s.herdr.pane_id)} in herdr">${escHtml(s.herdr.pane_id)}</button>`
-      : escHtml(new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    // A session herdr is running is marked by herdr's own icon on the title,
+    // in herdr's colour. The pane address it used to print is machine detail —
+    // the row is still clickable, so the address itself said nothing a reader
+    // needed. It stays in the tooltip for when it does.
+    const inHerdr = !!s.herdr;
+    const herdrIcon = inHerdr
+      ? `<svg class="fl-herdric"><use href="#ic-herdr"/></svg>`
+      : '';
+    const meta = escHtml(new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
     // Key moments are marked on the bar itself, so a spawn or a finish is
     // visible without opening the row. Agents spawning is the one that
@@ -4468,7 +4538,9 @@ function flRender() {
 
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}" data-session="${escHtml(s.session_id)}">
       <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml(flLocation(s))}">
-        ${forkIcon}<span class="fl-name">${escHtml(label)}</span>${ctx ? `<span class="fl-ctx">${ctx}</span>` : ''}<span class="fl-when">${meta}</span>
+        <div class="fl-l1">${herdrIcon}${forkIcon}<span class="fl-name${inHerdr ? ' herdr' : ''}">${escHtml(label)}</span></div>
+        <div class="fl-l2"><span class="fl-ctx">${ctx}</span><span class="fl-when">${meta}</span></div>
+        <span class="fl-grip" title="drag to resize"></span>
       </div>
       <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
         ${link}${bars}
@@ -4481,7 +4553,9 @@ function flRender() {
       const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
       rows.push(`<div class="fl-row agent${sel}" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
         <div class="fl-label agent" title="${escHtml(a.description || '')}">
-          <span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span>
+          <div class="fl-l1"><span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span></div>
+          ${a.description ? `<div class="fl-l2"><span class="fl-ctx">${escHtml(a.description)}</span></div>` : ''}
+          <span class="fl-grip" title="drag to resize"></span>
         </div>
         <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
           <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
@@ -4491,7 +4565,7 @@ function flRender() {
     }
   }
 
-  const ruler = `<div class="fl-ruler"><div class="fl-label"></div>` +
+  const ruler = `<div class="fl-ruler"><div class="fl-label"><span class="fl-grip" title="drag to resize"></span></div>` +
     `<div class="fl-track" style="width:${canvas}px">${ticks}</div></div>`;
   html += rows.length
     ? `<div class="fl-scroll"><div class="fl-canvas">${ruler}${rows.join('')}</div></div>`
@@ -4552,9 +4626,9 @@ function flApplyZoom(host, factor, anchorClientX) {
     // Position within the track, past the sticky label gutter. Clamped at 0 so
     // pointing at the label column anchors the track's left edge rather than a
     // negative offset.
-    const trackX = Math.max(0, scroller.scrollLeft + viewX - FL_LABEL_PX);
+    const trackX = Math.max(0, scroller.scrollLeft + viewX - flLabelW());
     const ratio = next / flZoom;
-    flPendingScrollLeft = Math.max(0, trackX * ratio + FL_LABEL_PX - viewX);
+    flPendingScrollLeft = Math.max(0, trackX * ratio + flLabelW() - viewX);
   }
 
   flZoom = next;
@@ -4619,19 +4693,68 @@ function flBindControls(host) {
     }));
 }
 
+// Drag-to-resize on the label column.
+//
+// Width is applied to a CSS custom property during the drag, so every row
+// follows the pointer without a re-render; the chart is only rebuilt on
+// release, because its canvas width is derived from the space left over and
+// recomputing it per pointer-move would rebuild the whole gantt at 60Hz.
+function flBindResize(host) {
+  const canvas = host.querySelector('.fl-canvas');
+  if (!canvas) return;
+
+  host.querySelectorAll('.fl-grip').forEach(grip => {
+    grip.addEventListener('pointerdown', ev => {
+      // The grip lives inside the label, which toggles a row on click. Stop
+      // here or every resize also expands or collapses something.
+      ev.preventDefault();
+      ev.stopPropagation();
+      const startX = ev.clientX;
+      const startW = flLabelW();
+      canvas.classList.add('resizing');
+      grip.setPointerCapture(ev.pointerId);
+
+      const move = e => flSetLabelW(startW + (e.clientX - startX));
+      const up = () => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        canvas.classList.remove('resizing');
+        // The track's width is a function of the label's, so the bars are only
+        // correct again after a rebuild.
+        flRender();
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+    // A label click toggles the row; the grip must not inherit that.
+    grip.addEventListener('click', ev => ev.stopPropagation());
+  });
+}
+
 function flBindRows(host) {
   const tip = document.getElementById('tl-tip');
 
   // Focus only. herdr can also submit prompts to another agent; a dashboard
   // must not, because that spends someone else's context on a decision they
   // did not make.
-  host.querySelectorAll('.fl-pane').forEach(el =>
+  //
+  // The pane chip that used to carry this is gone — it printed an address no
+  // reader needed. Clicking the herdr icon does the same job, and the icon is
+  // already the thing that says "this is running in a pane".
+  host.querySelectorAll('.fl-herdric').forEach(el =>
     el.addEventListener('click', ev => {
+      const row = el.closest('.fl-row');
+      const s = flData.sessions.find(x => x.session_id === row.dataset.session);
+      if (!s || !s.herdr) return;
       ev.stopPropagation();
-      fetch('/api/herdr/focus/' + encodeURIComponent(el.dataset.pane), { method: 'POST' })
+      fetch('/api/herdr/focus/' + encodeURIComponent(s.herdr.pane_id), { method: 'POST' })
         .then(r => { if (!r.ok) throw new Error('focus'); })
         .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
     }));
+
+  flBindResize(host);
 
   // A marker describes the moment it sits on, not the session it belongs to:
   // hovering a spawn should answer "what was spawned here", which the session

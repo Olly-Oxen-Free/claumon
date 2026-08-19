@@ -56,7 +56,9 @@ func newObservability(cfg Config) *observability {
 		loopSeen: make(map[string]string),
 	}
 	if cfg.Alerts.Enabled {
-		log.Printf("[alert] forecast-risk alerts on (cap %.0f%%)", o.alerts.Config().CapPct)
+		ac := o.alerts.Config()
+		log.Printf("[alert] forecast-risk alerts on (cap %.0f%%, quiet below %.0f%% used, at most one per %s)",
+			ac.CapPct, ac.MinCurrentPct, ac.MinInterval())
 	}
 	if o.exporter.Enabled() {
 		log.Printf("[otel] exporting to %s every %v",

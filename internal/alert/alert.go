@@ -18,6 +18,27 @@ import (
 	"time"
 )
 
+// canonicalResetLayout is minute precision: the API returns resets_at with
+// sub-second jitter that differs on every poll, and a window's identity must
+// not change just because the clock did.
+const canonicalResetLayout = "2006-01-02T15:04:00Z"
+
+// NormalizeWindow reduces a resets_at string to a stable window identity.
+//
+// The API returns the same window as "…T19:20:00.310465+00:00" on one poll and
+// "…T19:19:59.866966+00:00" on the next. Used raw as a dedupe key, every poll
+// is a new window and every poll notifies — which is exactly what happened.
+func NormalizeWindow(s string) string {
+	if s == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	return t.UTC().Add(30 * time.Second).Truncate(time.Minute).Format(canonicalResetLayout)
+}
+
 // Level ranks how confident the projection is that the cap will be breached.
 type Level string
 
@@ -77,15 +98,36 @@ type Config struct {
 	WebhookURL string `json:"webhook_url"`
 	// Gauges limits which gauges can alert. Empty means all of them.
 	Gauges []string `json:"gauges,omitempty"`
+
+	// MinCurrentPct is how far into the window usage must be before a
+	// projection is allowed to speak.
+	//
+	// Early in a window the model is extrapolating from very little: at 7%
+	// used, a short burst projects to 300% and the projection swings by a
+	// hundred points between polls. Those are real model outputs, but they are
+	// not yet news — the window has hours of slack and the estimate has not
+	// settled. Waiting until usage is materially along makes the warning both
+	// stabler and actionable.
+	MinCurrentPct float64 `json:"min_current_pct"`
+
+	// MinIntervalMins is the shortest gap between two notifications for the
+	// same gauge, whatever changed in between.
+	//
+	// Without it, an escalation or a re-opened window can still produce a
+	// burst. The projection is a slow-moving quantity; being told about it
+	// more than once an hour cannot change what the reader does.
+	MinIntervalMins int `json:"min_interval_mins"`
 }
 
 // DefaultConfig is off, and — when switched on — warns about the cap the
 // gauges actually enforce.
 func DefaultConfig() Config {
 	return Config{
-		Enabled: false,
-		CapPct:  100,
-		Desktop: true,
+		Enabled:         false,
+		CapPct:          100,
+		Desktop:         true,
+		MinCurrentPct:   50,
+		MinIntervalMins: 60,
 	}
 }
 
@@ -93,7 +135,24 @@ func (c Config) withDefaults() Config {
 	if c.CapPct <= 0 {
 		c.CapPct = 100
 	}
+	// Zero means "not configured", not "no floor": a config written before
+	// these fields existed must get the paced behaviour, not the old
+	// every-poll one. Set the field negative to genuinely disable a floor.
+	if c.MinCurrentPct == 0 {
+		c.MinCurrentPct = DefaultConfig().MinCurrentPct
+	}
+	if c.MinIntervalMins == 0 {
+		c.MinIntervalMins = DefaultConfig().MinIntervalMins
+	}
 	return c
+}
+
+// MinInterval is the configured gap as a duration.
+func (c Config) MinInterval() time.Duration {
+	if c.MinIntervalMins < 0 {
+		return 0
+	}
+	return time.Duration(c.MinIntervalMins) * time.Minute
 }
 
 func (c Config) allows(gauge string) bool {
@@ -121,6 +180,10 @@ func Evaluate(cfg Config, f Forecast, now time.Time) (Alert, bool) {
 	if f.ProjectedPct < cfg.CapPct {
 		return Alert{}, false
 	}
+	// Too early in the window for the projection to mean anything yet.
+	if f.CurrentPct < cfg.MinCurrentPct {
+		return Alert{}, false
+	}
 
 	level := LevelAtRisk
 	if f.Lower80Pct >= cfg.CapPct {
@@ -129,7 +192,7 @@ func Evaluate(cfg Config, f Forecast, now time.Time) (Alert, bool) {
 
 	return Alert{
 		Gauge:        f.Gauge,
-		ResetAt:      f.ResetAt,
+		ResetAt:      NormalizeWindow(f.ResetAt),
 		Level:        level,
 		Title:        title(f.Gauge, level),
 		Body:         body(f, cfg.CapPct, level, now),

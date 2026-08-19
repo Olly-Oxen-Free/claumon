@@ -205,7 +205,7 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 			// the repository root far above it. The worktree is added
 			// alongside, because that is the part the basename cannot show —
 			// two checkouts of one repo have the same basename.
-			fs.Repo = filepath.Base(cwd)
+			fs.Repo = repoLabel(cwd)
 			fs.Worktree = worktreeOf(cwd).Name
 		} else if s.Project != "" {
 			fs.Repo = filepath.Base(s.Project)
@@ -518,4 +518,19 @@ func isBoilerplateTitle(title string) bool {
 		}
 	}
 	return false
+}
+
+// repoLabel names a working directory the way a shell prompt would.
+//
+// The home directory's basename is the username, which says nothing: a session
+// run from ~ was labelled "jayden-eppcohen" alongside every other one. Shells
+// solve this with ~, and so does this.
+func repoLabel(cwd string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if filepath.Clean(cwd) == filepath.Clean(home) {
+			return "~"
+		}
+	}
+	return filepath.Base(cwd)
 }

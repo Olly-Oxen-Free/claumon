@@ -102,3 +102,18 @@ func TestIsBoilerplateTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoLabelHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory")
+	}
+	// The home directory's basename is the username, which names nothing when
+	// a dozen sessions share it. A shell writes ~; so does this.
+	if got := repoLabel(home); got != "~" {
+		t.Errorf("repoLabel(home) = %q, want ~", got)
+	}
+	if got := repoLabel(filepath.Join(home, "Projects", "thing")); got != "thing" {
+		t.Errorf("repoLabel(subdir) = %q, want thing", got)
+	}
+}
