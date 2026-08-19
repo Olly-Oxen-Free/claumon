@@ -416,3 +416,92 @@ func TestBuildAgentRejectsATraversingID(t *testing.T) {
 		t.Fatal("a traversing agent id must be refused")
 	}
 }
+
+func TestSessionContextIsReadFromTheTranscript(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		{"type": "user", "timestamp": at(0), "cwd": "/home/me/Projects/widget",
+			"gitBranch": "feature/x",
+			"message":   map[string]any{"role": "user", "content": "hi"}},
+	})
+	tl, err := Build(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tl.Cwd != "/home/me/Projects/widget" {
+		t.Fatalf("cwd = %q", tl.Cwd)
+	}
+	if tl.Repo != "widget" {
+		t.Fatalf("repo = %q, want the working tree's basename", tl.Repo)
+	}
+	if tl.GitBranch != "feature/x" {
+		t.Fatalf("branch = %q", tl.GitBranch)
+	}
+}
+
+func TestContextIsReadEvenFromLinesWithNoMessage(t *testing.T) {
+	// Claude Code writes bookkeeping lines carrying cwd and branch but no
+	// message; skipping them before reading context loses both.
+	dir, id := fixture(t, []map[string]any{
+		{"type": "mode", "timestamp": at(0), "cwd": "/home/me/repo", "gitBranch": "main"},
+		userMsg(at(1), "hello"),
+	})
+	tl, _ := Build(dir, id)
+	if tl.Repo != "repo" || tl.GitBranch != "main" {
+		t.Fatalf("repo=%q branch=%q", tl.Repo, tl.GitBranch)
+	}
+}
+
+func TestDominantModelWinsOnVolumeNotRecency(t *testing.T) {
+	events := []Event{
+		{Model: "claude-opus-5"},
+		{Model: "claude-sonnet-4-6"},
+		{Model: "claude-sonnet-4-6"},
+		{Model: ""},
+	}
+	if got := dominantModel(events); got != "claude-sonnet-4-6" {
+		t.Fatalf("model = %q, want the one that did most of the work", got)
+	}
+	if got := dominantModel(nil); got != "" {
+		t.Fatalf("no events should yield no model, got %q", got)
+	}
+}
+
+func TestSessionEndCoversALongCallStartedEarlier(t *testing.T) {
+	// A 10-minute tool call started before a later quick message must extend
+	// the session's end; taking the last event's timestamp would cut it short.
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{toolUse("t1", "Bash", map[string]any{"command": "long"})}, nil),
+		userMsg(at(600), []any{toolResult("t1", false)}),
+		assistantMsg(at(5), []any{map[string]any{"type": "text", "text": "meanwhile"}}, nil),
+	})
+	tl, _ := Build(dir, id)
+	span := tl.EndedAt.Sub(tl.StartedAt)
+	if span < 600*time.Second {
+		t.Fatalf("session span = %v, want at least the 10-minute call", span)
+	}
+}
+
+func TestAgentRefCarriesItsModelAndSpan(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{toolUse("toolu_A", "Task", map[string]any{"description": "d"})}, nil),
+	})
+	writeAgent(t, dir, id, "agent-abc123",
+		agentMeta{AgentType: "Explore", ToolUseID: "toolu_A"}, agentWork(1))
+
+	tl, _ := Build(dir, id)
+	var ref *AgentRef
+	for _, e := range tl.Events {
+		if e.Agent != nil {
+			ref = e.Agent
+		}
+	}
+	if ref == nil {
+		t.Fatal("no agent ref")
+	}
+	if ref.Model != "claude-sonnet-4-6" {
+		t.Fatalf("agent model = %q", ref.Model)
+	}
+	if ref.StartedAt.IsZero() || !ref.EndedAt.After(ref.StartedAt) {
+		t.Fatalf("agent span not set: %v..%v", ref.StartedAt, ref.EndedAt)
+	}
+}

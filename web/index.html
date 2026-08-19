@@ -436,6 +436,52 @@ tr.clickable { cursor: pointer; }
 }
 .backdrop.open { display: block; }
 
+/* Timeline graph */
+.tl-graph { margin-bottom:18px; }
+.tl-ctx { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.tl-ctx span {
+  font-size:11px; padding:2px 8px; border-radius:10px;
+  background:var(--card); border:1px solid var(--border); color:var(--text-dim);
+  font-family:ui-monospace,monospace;
+}
+.tl-ctx span b { color:var(--text); font-weight:600; }
+.tl-lanes { position:relative; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.tl-lane { display:grid; grid-template-columns:150px 1fr; align-items:center; min-height:26px; }
+.tl-lane + .tl-lane { border-top:1px solid var(--border); }
+.tl-lane:hover { background:rgba(127,127,127,.05); }
+.tl-lane-name {
+  font-size:11px; padding:0 8px; color:var(--text-dim);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  border-right:1px solid var(--border); line-height:26px;
+}
+.tl-lane-name.agent { color:#a78bfa; cursor:pointer; }
+.tl-lane-name.more { font-style:italic; }
+.tl-track { position:relative; height:26px; }
+.tl-bar {
+  position:absolute; top:7px; height:12px; border-radius:2px;
+  background:var(--accent); opacity:.85; cursor:pointer; min-width:2px;
+}
+.tl-bar:hover { opacity:1; outline:1px solid var(--text); }
+.tl-bar.msg { background:var(--text-dim); opacity:.5; top:11px; height:4px; }
+.tl-bar.err { background:var(--danger, #f87171); }
+.tl-bar.sub { background:#a78bfa; }
+.tl-break { position:absolute; top:0; bottom:0; width:14px; background:repeating-linear-gradient(
+  115deg, transparent 0 3px, var(--border) 3px 4px); opacity:.9; }
+.tl-axis { position:relative; height:16px; margin-left:150px; }
+.tl-axis span { position:absolute; font-size:10px; color:var(--text-dim); transform:translateX(-50%); white-space:nowrap; }
+.tl-tip {
+  position:fixed; z-index:60; pointer-events:none; display:none;
+  background:var(--card); border:1px solid var(--border); border-radius:6px;
+  padding:8px 10px; font-size:12px; max-width:380px;
+  box-shadow:0 6px 24px rgba(0,0,0,.35);
+}
+.tl-tip h4 { margin:0 0 2px; font-size:12px; }
+.tl-tip .sub { color:var(--text-dim); font-size:11px; margin-bottom:6px;
+  font-family:ui-monospace,monospace; word-break:break-all; }
+.tl-tip dl { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin:0; }
+.tl-tip dt { color:var(--text-dim); font-size:11px; }
+.tl-tip dd { margin:0; font-family:ui-monospace,monospace; font-size:11px; }
+
 /* Timeline tab */
 .tl-controls { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
 .tl-controls select {
@@ -1151,6 +1197,8 @@ tr.clickable { cursor: pointer; }
       <span id="tl-live"></span>
     </div>
     <div class="tl-totals" id="tl-totals"></div>
+    <div class="tl-graph" id="tl-graph"></div>
+    <div class="tl-tip" id="tl-tip"></div>
     <div class="tl-list" id="tl-list">
       <div class="tl-empty">Pick a session to see what it did.</div>
     </div>
@@ -3328,6 +3376,7 @@ function tlLoadSessions() {
 function tlLoad(sessionId) {
   if (!sessionId) return;
   tlExpanded.clear();
+  tlShowAllLanes = false;
   const list = document.getElementById('tl-list');
   list.innerHTML = '<div class="tl-empty">Reading transcript…</div>';
 
@@ -3336,10 +3385,13 @@ function tlLoad(sessionId) {
     .then(tl => {
       tlRenderTotals(tl.totals);
       tlRenderEvents(tl, sessionId);
+      tlRenderGraph(tl);
       tlRenderLive(sessionId);
     })
     .catch(() => {
       document.getElementById('tl-totals').innerHTML = '';
+      document.getElementById('tl-graph').innerHTML = '';
+      tlCurrent = null;
       list.innerHTML = '<div class="tl-empty">No transcript for that session.</div>';
     });
 }
@@ -3458,6 +3510,284 @@ function tlActivate() {
   tlLoaded = true;
   tlLoadSessions();
 }
+
+
+// --- Timeline graph -------------------------------------------------------
+// A lane per thread: the session on top, then one per subagent it spawned.
+// Bars are placed on a shared time axis, so parallel agents visibly overlap
+// and a slow step is visibly slow.
+//
+// The axis is piecewise linear, not linear. A resumed session can span weeks
+// while holding a few hours of actual work, and a true linear axis renders all
+// of it as unreadable slivers. Idle gaps past a threshold collapse to a fixed
+// hatched break instead, so durations stay comparable inside each burst of
+// work while the whole session still fits on screen.
+
+// A gap longer than this collapses. Below it, time runs linearly, so the
+// ordinary pauses between tool calls keep their real proportions.
+const TL_GAP_MS = 5 * 60 * 1000;
+// Width given to a collapsed gap.
+const TL_BREAK_PX = 14;
+// The graph's drawing area, minus the lane-name gutter.
+const TL_GUTTER_PX = 150;
+// Agent lanes shown before collapsing the rest behind a toggle. A session that
+// fans out to dozens of agents would otherwise push the event list off screen.
+const TL_LANE_CAP = 12;
+
+let tlShowAllLanes = false;
+
+let tlCurrent = null;   // the timeline being displayed
+let tlScale = null;     // active time -> x mapping
+
+// buildScale merges the intervals into runs of activity and lays them out,
+// collapsing the gaps between runs.
+function tlBuildScale(intervals, width) {
+  const spans = intervals
+    .filter(iv => isFinite(iv[0]) && isFinite(iv[1]))
+    .map(iv => [iv[0], Math.max(iv[1], iv[0])])
+    .sort((a, b) => a[0] - b[0]);
+  if (!spans.length) return null;
+
+  const merged = [spans[0].slice()];
+  for (const [s, e] of spans.slice(1)) {
+    const last = merged[merged.length - 1];
+    if (s - last[1] <= TL_GAP_MS) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+
+  const breaks = merged.length - 1;
+  const active = merged.reduce((sum, [s, e]) => sum + (e - s), 0) || 1;
+  const usable = Math.max(40, width - breaks * TL_BREAK_PX);
+  const pxPerMs = usable / active;
+
+  const segs = [];
+  let x = 0;
+  merged.forEach(([s, e], i) => {
+    const w = (e - s) * pxPerMs;
+    segs.push({ t0: s, t1: e, x0: x, x1: x + w });
+    x += w;
+    if (i < merged.length - 1) {
+      segs.push({ breakAt: x, t0: e, t1: merged[i + 1][0] });
+      x += TL_BREAK_PX;
+    }
+  });
+
+  return {
+    width: x,
+    segs,
+    breaks: segs.filter(sg => sg.breakAt !== undefined).map(sg => sg.breakAt),
+    // map clamps outside the known runs: a timestamp in a collapsed gap
+    // belongs at the edge of the gap, not somewhere inside it.
+    map(t) {
+      const real = segs.filter(sg => sg.breakAt === undefined);
+      if (t <= real[0].t0) return real[0].x0;
+      for (const sg of real) {
+        if (t >= sg.t0 && t <= sg.t1) {
+          const span = sg.t1 - sg.t0;
+          return span === 0 ? sg.x0 : sg.x0 + ((t - sg.t0) / span) * (sg.x1 - sg.x0);
+        }
+        if (t < sg.t0) return sg.x0;
+      }
+      return real[real.length - 1].x1;
+    },
+  };
+}
+
+// tlLanes splits a timeline into the session's own events and one lane per
+// spawned agent.
+function tlLanes(tl) {
+  const own = [];
+  const agents = [];
+  for (const e of tl.events) {
+    if (e.kind === 'subagent' && e.agent) agents.push(e);
+    else own.push(e);
+  }
+  agents.sort((a, b) => new Date(a.at) - new Date(b.at));
+  return { own, agents };
+}
+
+// Every event contributes its own span; an agent contributes its full run.
+function tlEventSpan(e) {
+  const t0 = new Date(e.at).getTime();
+  let t1 = t0 + (e.duration_ms || 0);
+  if (e.kind === 'subagent' && e.agent && e.agent.ended_at) {
+    t1 = Math.max(t1, new Date(e.agent.ended_at).getTime());
+  }
+  return [t0, t1];
+}
+
+function tlBarClass(e) {
+  if (e.kind === 'subagent') return 'tl-bar sub';
+  if (e.is_error) return 'tl-bar err';
+  if (e.kind === 'tool') return 'tl-bar';
+  return 'tl-bar msg';
+}
+
+function tlRenderGraph(tl) {
+  tlCurrent = tl;
+  const host = document.getElementById('tl-graph');
+  if (!tl.events || !tl.events.length) { host.innerHTML = ''; return; }
+
+  // Cumulative cost in time order, so hovering answers "what had this cost by
+  // now" rather than only what the step itself cost.
+  const ordered = tl.events.slice().sort((a, b) => new Date(a.at) - new Date(b.at));
+  let running = 0;
+  const cumulative = new Map();
+  for (const e of ordered) {
+    running += (e.cost_usd || 0) + (e.kind === 'subagent' && e.agent ? e.agent.cost_usd || 0 : 0);
+    cumulative.set(e.seq, running);
+  }
+
+  const { own, agents } = tlLanes(tl);
+  // A hidden tab measures zero; wait for layout rather than drawing the whole
+  // session into a 320px fallback.
+  if (host.clientWidth === 0) {
+    requestAnimationFrame(() => tlRenderGraph(tl));
+    return;
+  }
+  const width = Math.max(320, host.clientWidth - TL_GUTTER_PX - 2);
+  tlScale = tlBuildScale(tl.events.map(tlEventSpan), width);
+  if (!tlScale) { host.innerHTML = ''; return; }
+
+  const t0 = new Date(tl.started_at).getTime();
+  const bar = (e) => {
+    const [s, en] = tlEventSpan(e);
+    const x = tlScale.map(s);
+    const w = Math.max(2, tlScale.map(en) - x);
+    return `<div class="${tlBarClass(e)}" style="left:${x}px;width:${w}px" data-seq="${e.seq}"></div>`;
+  };
+  const breaks = tlScale.breaks
+    .map(x => `<div class="tl-break" style="left:${x}px"></div>`).join('');
+
+  const laneRow = (name, cls, body, attrs) =>
+    `<div class="tl-lane"><div class="tl-lane-name ${cls}"${attrs || ''} title="${escHtml(name)}">${escHtml(name)}</div>` +
+    `<div class="tl-track">${breaks}${body}</div></div>`;
+
+  let html = '';
+  const ctx = [];
+  if (tl.repo) ctx.push(`<span>repo <b>${escHtml(tl.repo)}</b></span>`);
+  if (tl.git_branch) ctx.push(`<span>branch <b>${escHtml(tl.git_branch)}</b></span>`);
+  if (tl.model) ctx.push(`<span>model <b>${escHtml(shortModel(tl.model))}</b></span>`);
+  ctx.push(`<span>span <b>${escHtml(fmtDur(new Date(tl.ended_at) - new Date(tl.started_at)) || '—')}</b></span>`);
+  if (tl.cwd) ctx.push(`<span title="${escHtml(tl.cwd)}">tree <b>${escHtml(tl.cwd)}</b></span>`);
+  html += `<div class="tl-ctx">${ctx.join('')}</div>`;
+
+  html += '<div class="tl-lanes">';
+  html += laneRow('session', '', own.map(bar).join(''));
+
+  const shown = tlShowAllLanes ? agents : agents.slice(0, TL_LANE_CAP);
+  for (const a of shown) {
+    const label = (a.agent.agent_type || 'subagent') + (a.agent.tool_calls ? ` · ${a.agent.tool_calls}` : '');
+    html += laneRow(label, 'agent', bar(a), ` data-agent="${escHtml(a.agent.agent_id)}"`);
+  }
+
+  const hidden = agents.length - shown.length;
+  if (hidden > 0 || tlShowAllLanes) {
+    // The hidden agents still belong on the chart, so their bars are drawn on
+    // one shared lane: the fan-out stays visible without 60 rows of gutter.
+    const rest = agents.slice(shown.length);
+    const label = tlShowAllLanes ? 'show fewer' : `+${hidden} more agents`;
+    html += laneRow(label, 'agent more', rest.map(bar).join(''), ' data-lanes-toggle="1"');
+  }
+  html += '</div>';
+
+  // Axis labels at each run's start, which is where the eye lands after a
+  // break. Runs can be seconds apart, so a label is dropped unless it clears
+  // the previous one — overlapping timestamps are worse than fewer of them.
+  const MIN_LABEL_GAP_PX = 110;
+  let lastLabelX = -Infinity;
+  const ticks = tlScale.segs.filter(sg => sg.breakAt === undefined).map((sg, i, all) => {
+    const isLast = i === all.length - 1;
+    // The last run gets a label only if it clears the previous one too: a
+    // right-edge label overlapping its neighbour is the same defect.
+    if (sg.x0 - lastLabelX < MIN_LABEL_GAP_PX && i > 0) return '';
+    // Keep the final label inside the plot rather than half off the edge.
+    const shift = isLast ? 'transform:translateX(-100%)' : '';
+    lastLabelX = sg.x0;
+    return `<span style="left:${sg.x0}px;${shift}">${new Date(sg.t0).toLocaleString([], {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>`;
+  }).join('');
+  html += `<div class="tl-axis">${ticks}</div>`;
+
+  host.innerHTML = html;
+
+  // Hover detail. One delegated listener rather than one per bar: a busy
+  // session has hundreds.
+  const tip = document.getElementById('tl-tip');
+  host.querySelectorAll('.tl-bar').forEach(el => {
+    el.addEventListener('mouseenter', ev => {
+      const e = tl.events.find(x => x.seq === Number(el.dataset.seq));
+      if (!e) return;
+      tip.innerHTML = tlTipHtml(tl, e, t0, cumulative.get(e.seq) || 0);
+      tip.style.display = 'block';
+      tlPlaceTip(ev);
+    });
+    el.addEventListener('mousemove', tlPlaceTip);
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
+
+  // Clicking an agent lane opens that agent's events in the list below;
+  // clicking the overflow lane expands the rest.
+  host.querySelectorAll('.tl-lane-name.agent').forEach(el => {
+    el.addEventListener('click', () => {
+      if (el.dataset.lanesToggle) {
+        tlShowAllLanes = !tlShowAllLanes;
+        tlRenderGraph(tl);
+        return;
+      }
+      const row = document.querySelector(`.tl-row.subagent[data-agent="${el.dataset.agent}"]`);
+      if (row) { row.click(); row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    });
+  });
+}
+
+function tlPlaceTip(ev) {
+  const tip = document.getElementById('tl-tip');
+  const pad = 14;
+  let x = ev.clientX + pad;
+  let y = ev.clientY + pad;
+  const r = tip.getBoundingClientRect();
+  if (x + r.width > window.innerWidth) x = ev.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
+  tip.style.left = Math.max(4, x) + 'px';
+  tip.style.top = Math.max(4, y) + 'px';
+}
+
+function tlTipHtml(tl, e, sessionStart, costSoFar) {
+  const agent = e.kind === 'subagent' ? e.agent : null;
+  const elapsed = new Date(e.at).getTime() - sessionStart;
+  const rows = [];
+
+  rows.push(['repo', tl.repo || '—']);
+  rows.push(['tree', tl.cwd || '—']);
+  if (tl.git_branch) rows.push(['branch', tl.git_branch]);
+  rows.push(['agent', agent ? (agent.agent_type || 'subagent') : 'session']);
+  rows.push(['model', shortModel((agent && agent.model) || e.model || tl.model || '—')]);
+  // How far into the session this step happened, which is the question
+  // "length of run at this point" is really asking.
+  rows.push(['elapsed', fmtDur(elapsed) || '0s']);
+  if (e.duration_ms) rows.push(['ran', fmtDur(e.duration_ms)]);
+  if (agent) rows.push(['agent cost', '$' + (agent.cost_usd || 0).toFixed(2)]);
+  else if (e.cost_usd) rows.push(['step cost', fmtCostSmall(e.cost_usd)]);
+  rows.push(['cost so far', '$' + costSoFar.toFixed(2)]);
+  if (e.is_error) rows.push(['result', 'error']);
+
+  const title = agent ? (agent.agent_type || 'subagent') : (e.title || e.kind);
+  const detail = agent ? (agent.description || '') : (e.detail || '');
+
+  return `<h4>${escHtml(title)}</h4>` +
+    (detail ? `<div class="sub">${escHtml(detail)}</div>` : '') +
+    '<dl>' + rows.map(([k, v]) =>
+      `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+}
+
+// The axis is laid out in pixels, so a resize has to re-derive it.
+let tlResizeTimer = null;
+window.addEventListener('resize', () => {
+  if (!tlCurrent) return;
+  clearTimeout(tlResizeTimer);
+  tlResizeTimer = setTimeout(() => tlRenderGraph(tlCurrent), 150);
+});
 
 </script>
 </body>

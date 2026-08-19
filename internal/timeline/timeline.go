@@ -76,14 +76,20 @@ type Event struct {
 // AgentRef summarises a spawned subagent. Its own events are fetched
 // separately so a session with many agents stays cheap to render.
 type AgentRef struct {
-	AgentID     string  `json:"agent_id"`
-	AgentType   string  `json:"agent_type,omitempty"`
-	Description string  `json:"description,omitempty"`
-	SpawnDepth  int     `json:"spawn_depth,omitempty"`
-	Events      int     `json:"events"`
-	ToolCalls   int     `json:"tool_calls"`
-	CostUSD     float64 `json:"cost_usd"`
-	DurationMS  int64   `json:"duration_ms"`
+	AgentID     string `json:"agent_id"`
+	AgentType   string `json:"agent_type,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Model is the model this agent mostly ran on, which can differ from the
+	// parent's when the agent type pins one.
+	Model string `json:"model,omitempty"`
+	// StartedAt and EndedAt place the agent on a time axis.
+	StartedAt  time.Time `json:"started_at,omitzero"`
+	EndedAt    time.Time `json:"ended_at,omitzero"`
+	SpawnDepth int       `json:"spawn_depth,omitempty"`
+	Events     int       `json:"events"`
+	ToolCalls  int       `json:"tool_calls"`
+	CostUSD    float64   `json:"cost_usd"`
+	DurationMS int64     `json:"duration_ms"`
 }
 
 // Totals aggregates a timeline.
@@ -101,9 +107,18 @@ type Totals struct {
 
 // Timeline is one session's event stream.
 type Timeline struct {
-	SessionID string    `json:"session_id"`
-	Project   string    `json:"project,omitempty"`
-	AgentID   string    `json:"agent_id,omitempty"`
+	SessionID string `json:"session_id"`
+	Project   string `json:"project,omitempty"`
+	AgentID   string `json:"agent_id,omitempty"`
+	// Cwd is the working tree the session ran in, and Repo its basename.
+	// Both come from the transcript rather than the encoded directory name,
+	// which mangles paths beyond reliable reversal.
+	Cwd  string `json:"cwd,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// GitBranch is the branch checked out when the session ran.
+	GitBranch string `json:"git_branch,omitempty"`
+	// Model is the model that did most of the work here.
+	Model     string    `json:"model,omitempty"`
 	StartedAt time.Time `json:"started_at,omitzero"`
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 	Events    []Event   `json:"events"`
@@ -118,6 +133,7 @@ type line struct {
 	UUID      string    `json:"uuid"`
 	SessionID string    `json:"sessionId"`
 	CWD       string    `json:"cwd"`
+	GitBranch string    `json:"gitBranch"`
 	IsMeta    bool      `json:"isMeta"`
 	Message   *struct {
 		Role    string          `json:"role"`
@@ -232,6 +248,15 @@ func buildFromFile(path, sessionID string) (*Timeline, error) {
 		var l line
 		if err := json.Unmarshal([]byte(raw), &l); err != nil {
 			continue
+		}
+		// Context lines carry cwd and branch even when they hold no message,
+		// so read those before skipping anything.
+		if tl.Cwd == "" && l.CWD != "" {
+			tl.Cwd = l.CWD
+			tl.Repo = filepath.Base(l.CWD)
+		}
+		if tl.GitBranch == "" && l.GitBranch != "" {
+			tl.GitBranch = l.GitBranch
 		}
 		if l.Message == nil || l.IsMeta {
 			continue
@@ -393,7 +418,10 @@ func attachAgents(tl *Timeline, sessDir string) {
 			AgentID:     agentID,
 			AgentType:   meta.AgentType,
 			Description: meta.Description,
+			Model:       sub.Model,
 			SpawnDepth:  meta.SpawnDepth,
+			StartedAt:   sub.StartedAt,
+			EndedAt:     sub.EndedAt,
 			Events:      sub.Totals.Events,
 			ToolCalls:   sub.Totals.ToolCalls,
 			CostUSD:     sub.Totals.CostUSD,
@@ -477,6 +505,27 @@ func readMeta(path string) agentMeta {
 	return m
 }
 
+// dominantModel is the model that produced the most events here. A session can
+// switch models mid-run; the tooltip wants the one that did the work, not the
+// last one seen.
+func dominantModel(events []Event) string {
+	counts := map[string]int{}
+	for _, e := range events {
+		if e.Model != "" {
+			counts[e.Model]++
+		}
+	}
+	best, bestN := "", 0
+	for m, n := range counts {
+		// Ties break on the name so the answer is stable across runs; Go map
+		// iteration order is not.
+		if n > bestN || (n == bestN && m < best) {
+			best, bestN = m, n
+		}
+	}
+	return best
+}
+
 // finalize renumbers events and recomputes the totals.
 func finalize(tl *Timeline) {
 	var t Totals
@@ -504,9 +553,17 @@ func finalize(tl *Timeline) {
 	}
 	if len(tl.Events) > 0 {
 		tl.StartedAt = tl.Events[0].At
-		last := tl.Events[len(tl.Events)-1]
-		tl.EndedAt = last.At.Add(time.Duration(last.DurationMS) * time.Millisecond)
+		// The last event is not necessarily the one that ends latest: a long
+		// tool call started earlier can outlast it.
+		end := tl.Events[0].At
+		for _, ev := range tl.Events {
+			if fin := ev.At.Add(time.Duration(ev.DurationMS) * time.Millisecond); fin.After(end) {
+				end = fin
+			}
+		}
+		tl.EndedAt = end
 	}
+	tl.Model = dominantModel(tl.Events)
 	tl.Totals = t
 }
 

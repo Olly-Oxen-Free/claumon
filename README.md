@@ -280,6 +280,20 @@ makes exact nesting possible: agents fold into the Task call that spawned them r
 than being matched by position. An agent whose meta is missing still appears, so a
 spawned agent is never silently dropped.
 
+The tab opens with a **lane chart**: the session on top, then one lane per subagent,
+all on a shared time axis, so parallel agents visibly overlap and a slow step is
+visibly slow. Hovering any bar gives the repo, working tree, branch, agent type,
+model, how far into the session the step happened, how long it ran, and the running
+cost to that point.
+
+The axis is piecewise linear rather than linear. A resumed session can span weeks
+while containing a few hours of actual work; on a true linear axis all of it renders
+as unreadable slivers. Idle gaps past five minutes collapse to a hatched break, so
+durations stay comparable inside each burst of work while the whole session still
+fits. Sessions that fan out to dozens of agents show the first twelve lanes and draw
+the rest on one shared overflow lane, expandable — the fan-out stays visible without
+sixty rows of gutter pushing the event list off screen.
+
 Subagent rows expand in place, fetching that agent's own events on demand — a session
 can spawn dozens, and loading them all up front would make the first paint useless.
 
