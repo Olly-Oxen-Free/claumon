@@ -73,6 +73,9 @@ func newLimitWatch(cfg Config) *limitWatch {
 		ch := cfg.Notify.ChannelsFor(string(limits.KindReset))
 		log.Printf("[limits] watching %d limits from last run — reset alerts on (desktop=%v email=%v)",
 			len(w.state.Limits), ch.Desktop, ch.Email)
+		// Publish immediately so the cockpit page has the restored windows to
+		// show rather than sitting empty until the first poll lands.
+		w.publish()
 	}
 	return w
 }
@@ -199,7 +202,12 @@ type cockpitLimit struct {
 // an alert from going out.
 func (w *limitWatch) publish() {
 	w.mu.Lock()
-	view := cockpitView{LastPoll: w.state.LastPoll, Events: append([]loggedEvent(nil), w.events...)}
+	// Emit an empty array rather than null for an untouched history: a reader
+	// that indexes it should not have to special-case the first run.
+	events := make([]loggedEvent, 0, len(w.events))
+	events = append(events, w.events...)
+	view := cockpitView{LastPoll: w.state.LastPoll, Events: events}
+	view.Limits = make([]cockpitLimit, 0, len(w.state.Limits))
 	for _, l := range w.state.Limits {
 		cl := cockpitLimit{
 			Kind:     l.Kind,
