@@ -297,6 +297,21 @@ the newest sessions — the rows the eye goes to first.
 Clicking a row loads that session's own event list below: the map says *when*, the
 list says *what*.
 
+The map scrolls horizontally at a fixed scale per window — the same duration is the
+same width whatever else is on screen — and opens at the right-hand edge, which is
+the end of the window. It only jumps there on a deliberate action (first load, a
+window change, or the **now** button); a chart that scrolls itself while you are
+reading an earlier part of the day is worse than one that stays put.
+
+The event list sorts **newest first** by default, with an oldest-first toggle, and
+refreshes itself while a session is live. That refresh is **paused whenever you have
+scrolled away from the newest end**, so the list never reflows under you mid-read;
+a marker in the toolbar says when it is holding back.
+
+Tools and events carry icons following agents-observe's registry — a Bash call, a
+file read, a spawned agent and an MCP tool are each recognisable by shape before the
+label is read.
+
 Subagent rows expand in place, fetching that agent's own events on demand — a session
 can spawn dozens, and loading them all up front would make the first paint useless.
 

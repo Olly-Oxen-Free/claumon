@@ -436,11 +436,22 @@ tr.clickable { cursor: pointer; }
 }
 .backdrop.open { display: block; }
 
+/* Event icons */
+.ev-ic { width:13px; height:13px; flex:0 0 13px; vertical-align:-2px; }
+.ev-ic use { fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.ev-ic.fill use { fill:currentColor; stroke:none; }
+.ic-tool  { color:var(--teal); }
+.ic-agent { color:var(--purple); }
+.ic-user  { color:var(--green); }
+.ic-model { color:var(--text-dim); }
+.ic-err   { color:var(--red); }
+.ic-mcp   { color:var(--teal); }
+
 /* Fleet gantt */
 .fl-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
 .fl-windows, .fl-pan { display:flex; gap:4px; }
 .fl-btn {
-  background:var(--card); color:var(--text-dim); border:1px solid var(--border);
+  background:var(--bg-surface); color:var(--text-dim); border:1px solid var(--border);
   border-radius:5px; padding:3px 9px; font-size:11px; cursor:pointer;
 }
 .fl-btn:hover { color:var(--text); }
@@ -448,44 +459,48 @@ tr.clickable { cursor: pointer; }
 .fl-range, .fl-count { font-size:11px; color:var(--text-dim); font-family:ui-monospace,monospace; }
 .fl-count { margin-left:auto; }
 
-/* Lanes are positioned as percentages of the window, so the chart always
-   fits its container and the right edge is always the end of the window.
-   An earlier pixel-canvas version scrolled horizontally and opened at the
-   wrong end, hiding the newest sessions — the rows people look at first. */
 .fl-scroll {
-  overflow-y:auto; max-height:460px;
-  border:1px solid var(--border); border-radius:6px; background:var(--card);
+  overflow-x:auto; overflow-y:auto; max-height:460px;
+  border:1px solid var(--border); border-radius:6px; background:var(--bg-surface);
+  /* Keep the horizontal scrollbar visible rather than overlay-on-hover: it is
+     the only cue that there is more timeline off to the side. */
+  scrollbar-width:thin;
 }
-.fl-canvas { width:100%; }
+.fl-scroll::-webkit-scrollbar { height:10px; width:10px; }
+.fl-scroll::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px; }
+/* max-content, not auto: the rows are flex containers and take their width
+   from the parent, so an auto-sized canvas collapses to the viewport and the
+   tracks overflow invisibly instead of making the container scroll. */
+.fl-canvas { width:max-content; min-width:100%; }
 .fl-row { display:flex; align-items:center; height:24px; }
 .fl-row + .fl-row { border-top:1px solid var(--border); }
 .fl-row:hover { background:rgba(127,127,127,.06); }
 .fl-label {
   position:sticky; left:0; z-index:2; flex:0 0 190px; width:190px;
   display:flex; gap:6px; align-items:baseline; padding:0 8px; height:24px; line-height:24px;
-  background:var(--card); border-right:1px solid var(--border);
+  background:var(--bg-surface); border-right:1px solid var(--border);
   font-size:11px; cursor:pointer; overflow:hidden;
 }
-.fl-row:hover .fl-label { background:var(--bg, var(--card)); }
+.fl-row:hover .fl-label { background:var(--bg-hover); }
 .fl-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .fl-when { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:10px; margin-left:auto; }
 .fl-label.agent { padding-left:22px; }
-.fl-label.agent .fl-name { color:#a78bfa; }
-.fl-track { position:relative; height:24px; flex:1 1 auto; overflow:hidden; }
+.fl-label.agent .fl-name { color:var(--purple); }
+.fl-track { position:relative; height:24px; flex:0 0 auto; }
 .fl-tick { display:none; }
 .fl-grid { position:absolute; top:0; bottom:0; width:1px; background:var(--border); opacity:.5; }
-.fl-now { position:absolute; top:0; bottom:0; width:1px; background:#4ade80; opacity:.8; }
+.fl-now { position:absolute; top:0; bottom:0; width:1px; background:var(--green); opacity:.8; }
 .fl-bar {
   position:absolute; top:6px; height:12px; border-radius:3px; cursor:pointer;
   background:var(--accent); opacity:.85; min-width:3px;
 }
 .fl-bar:hover { opacity:1; outline:1px solid var(--text); }
-.fl-bar.agent { background:#a78bfa; top:8px; height:8px; }
-.fl-bar.live { background:#4ade80; }
+.fl-bar.agent { background:var(--purple); top:8px; height:8px; }
+.fl-bar.live { background:var(--green); }
 
 /* The ruler is its own row so labels are not repeated per lane. */
 .fl-ruler { display:flex; align-items:center; height:18px; border-bottom:1px solid var(--border); }
-.fl-ruler .fl-label { background:var(--card); height:18px; line-height:18px; cursor:default; }
+.fl-ruler .fl-label { background:var(--bg-surface); height:18px; line-height:18px; cursor:default; }
 .fl-ruler .fl-track { height:18px; }
 .fl-ruler .fl-tick {
   display:block; position:absolute; top:2px; font-size:10px; color:var(--text-dim);
@@ -494,7 +509,7 @@ tr.clickable { cursor: pointer; }
 
 .tl-tip {
   position:fixed; z-index:60; pointer-events:none; display:none;
-  background:var(--card); border:1px solid var(--border); border-radius:6px;
+  background:var(--bg-surface); border:1px solid var(--border); border-radius:6px;
   padding:8px 10px; font-size:12px; max-width:380px;
   box-shadow:0 6px 24px rgba(0,0,0,.35);
 }
@@ -505,10 +520,16 @@ tr.clickable { cursor: pointer; }
 .tl-tip dt { color:var(--text-dim); font-size:11px; }
 .tl-tip dd { margin:0; font-family:ui-monospace,monospace; font-size:11px; }
 
+.tl-listbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.tl-listtitle { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; margin-right:4px; }
+.tl-paused { font-size:11px; color:var(--yellow); display:none; margin-left:auto; }
+.tl-paused.on { display:inline; }
+.tl-list { max-height:520px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; }
+
 /* Timeline tab */
 .tl-controls { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
 .tl-controls select {
-  background:var(--card); color:var(--text); border:1px solid var(--border);
+  background:var(--bg-surface); color:var(--text); border:1px solid var(--border);
   border-radius:6px; padding:6px 10px; font-size:13px; max-width:520px;
 }
 .tl-totals { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:16px; }
@@ -523,10 +544,10 @@ tr.clickable { cursor: pointer; }
 }
 .tl-row + .tl-row { border-top:1px solid var(--border); }
 .tl-row.tool { border-left-color:var(--accent); }
-.tl-row.subagent { border-left-color:#a78bfa; cursor:pointer; }
+.tl-row.subagent { border-left-color:var(--purple); cursor:pointer; }
 .tl-row.subagent:hover { background:rgba(167,139,250,.08); }
-.tl-row.err { border-left-color:var(--danger, #f87171); }
-.tl-row.prompt { border-left-color:#60a5fa; }
+.tl-row.err { border-left-color:var(--red); }
+.tl-row.prompt { border-left-color:var(--teal); }
 .tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; }
 .tl-glyph { text-align:center; }
 .tl-title { font-weight:600; }
@@ -535,10 +556,10 @@ tr.clickable { cursor: pointer; }
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .tl-dur, .tl-cost { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:12px; white-space:nowrap; }
-.tl-dur.slow { color:var(--warn, #fbbf24); }
-.tl-children { margin-left:24px; border-left:2px dashed #a78bfa; padding-left:8px; }
+.tl-dur.slow { color:var(--yellow); }
+.tl-children { margin-left:24px; border-left:2px dashed var(--purple); padding-left:8px; }
 .tl-empty { color:var(--text-dim); padding:24px; text-align:center; }
-.tl-live { font-size:11px; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,.15); color:#4ade80; }
+.tl-live { font-size:11px; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,.15); color:var(--green); }
 
 /* Memories tab */
 .memories-search { margin-bottom: 20px; }
@@ -1049,6 +1070,24 @@ tr.clickable { cursor: pointer; }
   <span id="authMessage"></span>
 </div>
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- Icon vocabulary mirrors agents-observe's event registry: a tool is
+       recognised by shape before the label is read. Drawn as an inline sprite
+       rather than pulled from an icon package, because this dashboard ships as
+       one embedded HTML file with no build step. -->
+  <g id="ic-zap"><path d="M8 1 L3 8 H7 L6 13 L11 6 H7 Z"/></g>
+  <g id="ic-book"><path d="M2 2h4a2 2 0 0 1 2 2v8a2 2 0 0 0-2-2H2z"/><path d="M14 2h-4a2 2 0 0 0-2 2v8a2 2 0 0 1 2-2h4z"/></g>
+  <g id="ic-pencil"><path d="M11.5 1.5 14 4l-8 8-3 1 1-3z"/></g>
+  <g id="ic-search"><circle cx="7" cy="7" r="4"/><path d="M10 10l4 4"/></g>
+  <g id="ic-globe"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2a10 10 0 0 1 0 12A10 10 0 0 1 8 2"/></g>
+  <g id="ic-bot"><rect x="3" y="5" width="10" height="8" rx="2"/><path d="M8 2v3M6 9h.01M10 9h.01"/></g>
+  <g id="ic-plug"><path d="M6 2v4M10 2v4M4 6h8v3a4 4 0 0 1-8 0z M8 13v2"/></g>
+  <g id="ic-check"><path d="M3 8.5 6.5 12 13 4"/></g>
+  <g id="ic-msg"><path d="M2 3h12v8H6l-4 3z"/></g>
+  <g id="ic-spark"><path d="M8 2l1.6 4.4L14 8l-4.4 1.6L8 14l-1.6-4.4L2 8l4.4-1.6z"/></g>
+  <g id="ic-alert"><circle cx="8" cy="8" r="6"/><path d="M8 5v4M8 11h.01"/></g>
+  <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
+</defs></svg>
 <div class="tabs">
   <div class="tab active" data-tab="dashboard">Dashboard</div>
   <div class="tab" data-tab="memories">Memories <span id="staleness-badge" class="tab-badge" style="display:none">0</span></div>
@@ -1222,6 +1261,12 @@ tr.clickable { cursor: pointer; }
     <div class="tl-totals" id="tl-totals"></div>
     <div class="tl-graph" id="tl-graph"></div>
     <div class="tl-tip" id="tl-tip"></div>
+    <div class="tl-listbar">
+      <span class="tl-listtitle">Events</span>
+      <button class="fl-btn on" id="tl-sort-new" data-sort="desc">Newest first</button>
+      <button class="fl-btn" id="tl-sort-old" data-sort="asc">Oldest first</button>
+      <span class="tl-paused" id="tl-paused">paused — scrolled away from the top</span>
+    </div>
     <div class="tl-list" id="tl-list">
       <div class="tl-empty">Pick a session to see what it did.</div>
     </div>
@@ -3354,6 +3399,9 @@ function fcFmtClock(ms) {
 // rather than navigating away, so the parent's ordering stays readable.
 let tlLoaded = false;
 let tlSessions = [];
+let tlSelected = null;
+let tlCurrentTimeline = null;
+let tlRefreshTimer = null;
 const tlExpanded = new Set();
 
 function fmtDur(ms) {
@@ -3371,7 +3419,38 @@ function fmtCostSmall(v) {
   return v < 0.01 ? '<$0.01' : '$' + v.toFixed(2);
 }
 
-const TL_GLYPH = { prompt: '›', message: '◆', tool: '⚙', subagent: '⑂' };
+// Maps a tool or event to an icon, following agents-observe's registry so the
+// same work looks the same in both dashboards.
+const EV_ICONS = {
+  Bash: ['ic-zap', 'ic-tool', true],
+  Read: ['ic-book', 'ic-tool', false],
+  Write: ['ic-pencil', 'ic-tool', false],
+  Edit: ['ic-pencil', 'ic-tool', false],
+  MultiEdit: ['ic-pencil', 'ic-tool', false],
+  NotebookEdit: ['ic-pencil', 'ic-tool', false],
+  Glob: ['ic-search', 'ic-tool', false],
+  Grep: ['ic-search', 'ic-tool', false],
+  WebSearch: ['ic-globe', 'ic-tool', false],
+  WebFetch: ['ic-globe', 'ic-tool', false],
+  Task: ['ic-bot', 'ic-agent', false],
+  TodoWrite: ['ic-check', 'ic-tool', false],
+  ToolSearch: ['ic-plug', 'ic-mcp', false],
+};
+
+function evIcon(e) {
+  let id = 'ic-spark', tone = 'ic-model', filled = true;
+  if (e.kind === 'prompt') { id = 'ic-msg'; tone = 'ic-user'; filled = false; }
+  else if (e.kind === 'subagent') { id = 'ic-bot'; tone = 'ic-agent'; filled = false; }
+  else if (e.kind === 'tool') {
+    // An MCP tool is named server__tool; anything unmapped falls back to the
+    // generic tool look rather than the model spark.
+    const hit = EV_ICONS[e.title] ||
+      (String(e.title).includes('__') ? ['ic-plug', 'ic-mcp', false] : ['ic-zap', 'ic-tool', true]);
+    [id, tone, filled] = hit;
+  }
+  if (e.is_error) tone = 'ic-err';
+  return `<svg class="ev-ic${filled ? ' fill' : ''} ${tone}" viewBox="0 0 16 16"><use href="#${id}"/></svg>`;
+}
 
 function tlLoadSessions() {
   return fetch('/api/sessions?range=all&limit=100')
@@ -3399,16 +3478,18 @@ function tlLoadSessions() {
 function tlLoad(sessionId) {
   if (!sessionId) return;
   tlExpanded.clear();
-  tlShowAllLanes = false;
   const list = document.getElementById('tl-list');
   list.innerHTML = '<div class="tl-empty">Reading transcript…</div>';
 
   fetch('/api/timeline/' + encodeURIComponent(sessionId))
     .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
     .then(tl => {
+      tlCurrentTimeline = tl;
       tlRenderTotals(tl.totals);
       tlRenderEvents(tl, sessionId);
       tlRenderLive(sessionId);
+      document.getElementById('tl-list').scrollTop = tlSort === 'desc' ? 0 : 0;
+      tlSetPausedFlag();
     })
     .catch(() => {
       document.getElementById('tl-totals').innerHTML = '';
@@ -3453,7 +3534,7 @@ function tlEventRow(e, sessionId) {
 
   return `<div class="${cls.join(' ')}"${attrs}>
     <span class="tl-time">${escHtml(time)}</span>
-    <span class="tl-glyph">${TL_GLYPH[e.kind] || '·'}</span>
+    <span class="tl-glyph">${evIcon(e)}</span>
     <span><span class="tl-title">${title}</span> <span class="tl-detail">${escHtml(e.detail || '')}</span></span>
     <span class="${durCls}">${escHtml(dur)}</span>
     <span class="tl-cost">${escHtml(fmtCostSmall(e.cost_usd || (e.agent && e.agent.cost_usd) || 0))}</span>
@@ -3462,13 +3543,48 @@ function tlEventRow(e, sessionId) {
     : '');
 }
 
+// Newest first by default: a live session's latest step is the one being
+// waited on, and it should not require a scroll to reach.
+let tlSort = 'desc';
+
 function tlRenderEvents(tl, sessionId) {
   const list = document.getElementById('tl-list');
   if (!tl.events || !tl.events.length) {
     list.innerHTML = '<div class="tl-empty">That session has no recorded activity.</div>';
     return;
   }
-  list.innerHTML = tl.events.map(e => tlEventRow(e, sessionId)).join('');
+  const events = tlSort === 'desc' ? tl.events.slice().reverse() : tl.events;
+  list.innerHTML = events.map(e => tlEventRow(e, sessionId)).join('');
+}
+
+// True while the reader has scrolled away from the newest end. Refreshes are
+// held back in that state: a list that reflows under you while you are reading
+// it costs more than the freshness is worth.
+function tlListPinned() {
+  const list = document.getElementById('tl-list');
+  if (!list) return true;
+  return tlSort === 'desc' ? list.scrollTop <= 8
+                           : list.scrollTop + list.clientHeight >= list.scrollHeight - 8;
+}
+
+function tlSetPausedFlag() {
+  const el = document.getElementById('tl-paused');
+  if (el) el.classList.toggle('on', !tlListPinned());
+}
+
+// Re-reads the selected session and updates the list, unless the reader has
+// scrolled into the history.
+function tlRefresh() {
+  if (!tlSelected || !tlListPinned()) { tlSetPausedFlag(); return; }
+  fetch('/api/timeline/' + encodeURIComponent(tlSelected))
+    .then(r => (r.ok ? r.json() : null))
+    .then(tl => {
+      if (!tl) return;
+      tlRenderTotals(tl.totals);
+      tlRenderEvents(tl, tlSelected);
+      tlRenderLive(tlSelected);
+    })
+    .catch(() => {});
 }
 
 // Marks the selected session live when the hooks report it running.
@@ -3523,6 +3639,20 @@ document.getElementById('tl-list').addEventListener('click', ev => {
 
 document.getElementById('tl-session').addEventListener('change', e => tlLoad(e.target.value));
 
+document.querySelectorAll('.tl-listbar .fl-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    tlSort = b.dataset.sort;
+    document.querySelectorAll('.tl-listbar .fl-btn').forEach(x => x.classList.toggle('on', x === b));
+    if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+    // Land at the newest end, which is the top in one order and the bottom in
+    // the other.
+    const list = document.getElementById('tl-list');
+    list.scrollTop = tlSort === 'desc' ? 0 : list.scrollHeight;
+    tlSetPausedFlag();
+  }));
+
+document.getElementById('tl-list').addEventListener('scroll', tlSetPausedFlag);
+
 // Loaded on first visit rather than at startup: parsing a transcript is real
 // work, and most visits never open this tab.
 function tlActivate() {
@@ -3530,6 +3660,10 @@ function tlActivate() {
   tlLoaded = true;
   flLoad();
   tlLoadSessions();
+  // A live session keeps producing events; refresh on a timer, and let
+  // tlRefresh decide whether the reader is in a position to accept them.
+  clearInterval(tlRefreshTimer);
+  tlRefreshTimer = setInterval(tlRefresh, 5000);
 }
 
 
@@ -3546,13 +3680,15 @@ function tlActivate() {
 // fit one session on screen; that made every chart a different scale and
 // nothing comparable to anything else.
 
-// tick is the spacing of ruler labels for each window.
+// pxPerHour is the drawing scale; a window wider than the viewport scrolls
+// horizontally rather than being squeezed, so a short session stays a visible
+// bar instead of a sliver. tick is the spacing of ruler labels.
 const FL_WINDOWS = [
-  { key: '1h', label: '1 hour',  tick: 10 * 60 * 1000 },
-  { key: '3h', label: '3 hours', tick: 30 * 60 * 1000 },
-  { key: '1d', label: '1 day',   tick: 3600 * 1000 * 3 },
-  { key: '3d', label: '3 days',  tick: 3600 * 1000 * 12 },
-  { key: '1w', label: '1 week',  tick: 3600 * 1000 * 24 },
+  { key: '1h', label: '1 hour',  pxPerHour: 900, tick: 5 * 60 * 1000 },
+  { key: '3h', label: '3 hours', pxPerHour: 400, tick: 15 * 60 * 1000 },
+  { key: '1d', label: '1 day',   pxPerHour: 90,  tick: 2 * 3600 * 1000 },
+  { key: '3d', label: '3 days',  pxPerHour: 44,  tick: 6 * 3600 * 1000 },
+  { key: '1w', label: '1 week',  pxPerHour: 22,  tick: 12 * 3600 * 1000 },
 ];
 
 const FL_LABEL_PX = 190;
@@ -3561,6 +3697,10 @@ let flWindow = '1d';
 let flEnd = null;            // null means "now", refreshed on each render
 let flData = null;
 let flExpanded = new Set();  // sessions whose agents are shown
+// Set when the view should jump to the right-hand (most recent) edge after
+// the next render. Only ever set from a user action: a scroll that moves on
+// its own while you are reading is worse than one that never moves.
+let flScrollToNow = true;
 
 function flSpec() {
   return FL_WINDOWS.find(w => w.key === flWindow) || FL_WINDOWS[2];
@@ -3590,17 +3730,19 @@ function flRender() {
   const spec = flSpec();
   const from = new Date(flData.from).getTime();
   const to = new Date(flData.to).getTime();
-  // Position as a percentage of the window rather than in pixels: the chart
-  // then fits any container, the right edge is always the end of the window,
-  // and there is no scroll position to get wrong.
-  const x = t => ((t - from) / (to - from)) * 100;
+  // Pixels, so a window can be drawn wider than the viewport and scrolled.
+  // The scale is fixed per window rather than fitted, so the same duration is
+  // the same width whatever else is on screen.
+  const hours = (to - from) / 3600000;
+  const avail = Math.max(320, host.clientWidth - FL_LABEL_PX - 26);
+  const canvas = Math.max(avail, Math.round(hours * spec.pxPerHour));
+  const x = t => ((t - from) / (to - from)) * canvas;
   const clampBar = (s, e) => {
     const x0 = Math.max(0, x(Math.max(s, from)));
-    const x1 = Math.min(100, x(Math.min(e || s, to)));
-    // The visible floor is CSS min-width on .fl-bar rather than a percentage:
-    // a two-second session in a week-wide window rounds to ~0% and would
-    // disappear, and what "big enough to see" means is a pixel question.
-    return [x0, Math.max(0, x1 - x0)];
+    const x1 = Math.min(canvas, x(Math.min(e || s, to)));
+    // A visible floor: a two-second session in a week-wide window would
+    // otherwise round away to nothing.
+    return [x0, Math.max(3, x1 - x0)];
   };
 
   // Controls: window choice, and panning so the view is not stuck on "now".
@@ -3629,12 +3771,12 @@ function flRender() {
     const label = step >= 86400000
       ? d.toLocaleDateString([], { month: 'short', day: 'numeric' })
       : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    ticks += `<span class="fl-tick" style="left:${x(t)}%">${escHtml(label)}</span>`;
-    ticks += `<i class="fl-grid" style="left:${x(t)}%"></i>`;
+    ticks += `<span class="fl-tick" style="left:${x(t)}px">${escHtml(label)}</span>`;
+    ticks += `<i class="fl-grid" style="left:${x(t)}px"></i>`;
   }
   // "Now" only exists inside the window when the view has not been panned back.
   const now = Date.now();
-  const nowMark = now >= from && now <= to ? `<i class="fl-now" style="left:${x(now)}%"></i>` : '';
+  const nowMark = now >= from && now <= to ? `<i class="fl-now" style="left:${x(now)}px"></i>` : '';
 
   const rows = [];
   for (const s of flData.sessions) {
@@ -3652,9 +3794,9 @@ function flRender() {
       <div class="fl-label" title="${escHtml((s.title || s.cwd || ''))}">
         <span class="fl-name">${escHtml(label)}</span><span class="fl-when">${escHtml(meta)}</span>
       </div>
-      <div class="fl-track">${ticks}${nowMark}
+      <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
         <div class="fl-bar session${s.is_running ? ' live' : ''}"
-             style="left:${bx}%;width:${bw}%" data-session="${escHtml(s.session_id)}"></div>
+             style="left:${bx}px;width:${bw}px" data-session="${escHtml(s.session_id)}"></div>
       </div>
     </div>`);
 
@@ -3665,8 +3807,8 @@ function flRender() {
         <div class="fl-label agent" title="${escHtml(a.description || '')}">
           <span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span>
         </div>
-        <div class="fl-track">${ticks}${nowMark}
-          <div class="fl-bar agent" style="left:${ax}%;width:${aw}%"
+        <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
+          <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
                data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"></div>
         </div>
       </div>`);
@@ -3674,7 +3816,7 @@ function flRender() {
   }
 
   const ruler = `<div class="fl-ruler"><div class="fl-label"></div>` +
-    `<div class="fl-track">${ticks}</div></div>`;
+    `<div class="fl-track" style="width:${canvas}px">${ticks}</div></div>`;
   html += rows.length
     ? `<div class="fl-scroll"><div class="fl-canvas">${ruler}${rows.join('')}</div></div>`
     : '<div class="tl-empty">No sessions in this window.</div>';
@@ -3683,26 +3825,39 @@ function flRender() {
   flBindControls(host);
   flBindRows(host);
 
-  // Open at the right-hand edge. The window ends at "now" and sessions are
-  // listed newest first, so a left-aligned scroll hides exactly the rows the
-  // eye goes to first.
-  // Open at the right-hand edge. The window ends at "now" and sessions are
+  // Open at the right-hand edge, which is the end of the window. Sessions are
   // listed newest first, so a left-aligned scroll hides exactly the rows the
   // eye goes to first.
   //
-  // Retried rather than set once: scrollLeft against freshly written innerHTML
-  // is silently dropped until the element has been laid out, and a single
-  // rAF is not reliably late enough.
+  // Only after a user action (first load, a window change, or "now"): a chart
+  // that scrolls itself while you are reading an earlier part of the day is
+  // worse than one that stays put.
+  if (flScrollToNow) {
+    flScrollToNow = false;
+    const scroller = host.querySelector('.fl-scroll');
+    if (scroller) {
+      // Retried rather than set once: scrollLeft against freshly written
+      // markup is dropped until the element has been laid out, and one frame
+      // is not reliably late enough. Assigning past the maximum clamps, so
+      // this needs no measurement — it only has to land after layout.
+      let tries = 12;
+      const toNow = () => {
+        scroller.scrollLeft = scroller.scrollWidth;
+        if (scroller.scrollLeft === 0 && tries-- > 0) setTimeout(toNow, 60);
+      };
+      requestAnimationFrame(toNow);
+    }
+  }
 }
 
 function flBindControls(host) {
   host.querySelectorAll('.fl-btn[data-window]').forEach(b =>
-    b.addEventListener('click', () => { flWindow = b.dataset.window; flLoad(); }));
+    b.addEventListener('click', () => { flWindow = b.dataset.window; flScrollToNow = true; flLoad(); }));
 
   host.querySelectorAll('.fl-btn[data-pan]').forEach(b =>
     b.addEventListener('click', () => {
       const dir = Number(b.dataset.pan);
-      if (dir === 0) { flEnd = null; flLoad(); return; }
+      if (dir === 0) { flEnd = null; flScrollToNow = true; flLoad(); return; }
       const span = new Date(flData.to) - new Date(flData.from);
       // Half a window per step, so context carries across the move.
       flEnd = (flEnd || Date.now()) + dir * span / 2;
@@ -3740,9 +3895,9 @@ function flBindRows(host) {
       const a = el.dataset.agent && (s.agents || []).find(y => y.agent_id === el.dataset.agent);
       tip.innerHTML = flTipHtml(s, a || null);
       tip.style.display = 'block';
-      tlPlaceTip(ev);
+      flPlaceTip(ev);
     });
-    el.addEventListener('mousemove', tlPlaceTip);
+    el.addEventListener('mousemove', flPlaceTip);
     el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
   });
 }
@@ -3763,6 +3918,22 @@ function flOpenAgent(sessionId, agentId) {
     if (tries > 0) setTimeout(() => tryOpen(tries - 1), 120);
   };
   setTimeout(() => tryOpen(20), 200);
+}
+
+// Places the tooltip beside the cursor, flipping when it would run off the
+// edge. This was lost when the previous chart was removed, leaving every
+// hover to throw before the tooltip could be positioned — which is why none
+// of them appeared.
+function flPlaceTip(ev) {
+  const tip = document.getElementById('tl-tip');
+  const pad = 14;
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + pad;
+  let y = ev.clientY + pad;
+  if (x + r.width > window.innerWidth) x = ev.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
+  tip.style.left = Math.max(4, x) + 'px';
+  tip.style.top = Math.max(4, y) + 'px';
 }
 
 function flTipHtml(s, agent) {
