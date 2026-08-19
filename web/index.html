@@ -460,27 +460,20 @@ tr.clickable { cursor: pointer; }
 /* An MCP call is still tool usage; the plug shape is what sets it apart. */
 .ic-mcp   { color:var(--ev-tool); }
 
-/* The thread being read. Brighter and lit, so it is findable at a glance in a
-   chart of twenty rows without hiding the others. */
-.fl-row.sel { background:rgba(218,119,86,.07); }
-.fl-row.sel .fl-label { background:rgba(218,119,86,.10); }
+/* The thread being read is marked by a border around its row rather than by
+   being drawn brighter than the rest. Every line renders at full strength, so
+   there is no dimness left to lift — and selection by brightness competed with
+   heat, with live-vs-ended colour, and with the cold dashes, all of which are
+   themselves carried by intensity. A border collides with none of them. */
+.fl-row.sel {
+  background:rgba(218,119,86,.07);
+  box-shadow:inset 0 0 0 1px var(--accent);
+  border-radius:3px;
+}
+.fl-row.sel .fl-label {
+  background:rgba(218,119,86,.10);
+}
 .fl-row.sel .fl-name { color:var(--text-bright); font-weight:600; }
-.fl-row.sel .fl-bar {
-  opacity:1;
-  box-shadow:0 0 6px 1px color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.fl-row.sel .fl-bar.agent {
-  box-shadow:0 0 6px 1px color-mix(in srgb, var(--purple) 55%, transparent);
-}
-.fl-row.sel .fl-bar.live {
-  box-shadow:0 0 6px 1px color-mix(in srgb, var(--green) 55%, transparent);
-}
-/* A selected row's bar goes to full opacity, so its stops go with it —
-   otherwise the line brightens and the stops stay faint on it. */
-.fl-row.sel .fl-mark { border-color:var(--fl-line, var(--accent)); }
-/* Same in heat view, where segments are drawn opaque because the colour is
-   the reading. */
-.fl-row.heat .fl-mark { border-color:var(--fl-line, var(--accent)); }
 
 /* A split thread: the replayed history is faint, and an elbow drops out of the
    parent's row at the moment the two diverged. */
@@ -498,9 +491,9 @@ tr.clickable { cursor: pointer; }
   background:linear-gradient(90deg,#1b1b2f,#3b1e6e,#8b1e5a,#d63a2f,#f2891f,#ffd400,#fff6c8);
 }
 .fl-legend b { display:none; }
-/* In heat view the colour is the message, so the selection glow is dropped —
-   it tinted the very reading it was meant to highlight. */
-.fl-row.heat.sel .fl-bar { box-shadow:none; outline:1px solid var(--text-bright); }
+/* Nothing special for heat: selection is a border on the row, which leaves
+   the bars' own colour — the reading — untouched. The old rule existed to undo
+   a glow that no longer exists. */
 
 /* Reading marker: where the event list is, projected onto the timeline. */
 .fl-read {
@@ -524,13 +517,10 @@ tr.clickable { cursor: pointer; }
   width:18px; height:18px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   background:var(--bg-surface);
-  /* Matched to the bar's own opacity. A ring drawn at full strength on a bar
-     drawn at .45 reads as a brighter element sitting on the line rather than
-     as a stop belonging to it — the stops glowed and the line receded, which
-     is backwards. The opacity rides on the border colour rather than the
-     element, so the disc's fill stays solid and the line still reads as
-     passing behind it. */
-  border:2.5px solid color-mix(in srgb, var(--fl-line, var(--accent)) 45%, transparent);
+  /* The ring is simply the line's colour. Bars, dashes and rings all render
+     at full strength, so nothing has to be matched to anything — which is what
+     kept going wrong when they were each carrying their own opacity. */
+  border:2.5px solid var(--fl-line, var(--accent));
   box-sizing:border-box; cursor:pointer; z-index:4;
 }
 .fl-mark:hover {
@@ -652,9 +642,9 @@ tr.clickable { cursor: pointer; }
    sitting on it are what the eye lands on. */
 .fl-bar {
   position:absolute; top:15px; height:5px; border-radius:3px; cursor:pointer;
-  background:var(--accent); opacity:.45; min-width:3px; z-index:1;
+  background:var(--accent); min-width:3px; z-index:1;
 }
-.fl-bar:hover { opacity:.8; }
+.fl-bar:hover { filter:brightness(1.25); }
 .fl-bar.agent { background:var(--purple); top:16px; height:3px; }
 /* A lull past the prompt cache's TTL: the session is open and the thread is
    intact, but resuming is no longer free. Drawn as a dashed run of the same
@@ -670,7 +660,7 @@ tr.clickable { cursor: pointer; }
   background:repeating-linear-gradient(90deg,
     var(--fl-line, var(--accent)) 0 calc(var(--fl-dash) * .5),
     transparent calc(var(--fl-dash) * .5) var(--fl-dash));
-  opacity:.55; border-radius:0;
+  border-radius:0;
 }
 /* In heat view the segment's own background is the reading, so the dashes are
    cut out of it with a mask instead of painted over it. */
@@ -4154,11 +4144,9 @@ function flForkCurve(child, childBarX, clampBar, colorOverride) {
   // In heat view the join carries the parent's colour at the split, so the
   // whole line — parent, curve, child — reads as one temperature there.
   const stroke = colorOverride || (parent && parent.is_running ? 'var(--green)' : 'var(--accent)');
-  // ...and the parent's own opacity. Drawing the join at full strength beside a
-  // 45%-opacity bar made the curve read as a different, darker element joined to
-  // the bar rather than as the bar continuing.
-  const lit = flHeat || (parent && parent.session_id === tlSelected) || child.session_id === tlSelected;
-  const alpha = lit ? 1 : 0.45;
+  // Full strength, like the bars it joins. The curve used to track the bars'
+  // 45% opacity so it would not read as a darker element beside them; now that
+  // nothing is drawn faint, there is nothing to match.
   const centre = FL_BAR_H / 2;
   const h = FL_ROW_H + FL_BAR_H;
   const curveStart = childBarX - FL_CURVE_W;
@@ -4190,7 +4178,7 @@ function flForkCurve(child, childBarX, clampBar, colorOverride) {
   const path = `M0,${centre} L${lead},${centre} C${c0},${centre} ${c1},${FL_ROW_H + centre} ${w},${FL_ROW_H + centre}`;
   return `<svg class="fl-fork-curve" style="left:${left}px;width:${w}px;height:${h}px;top:${-(FL_ROW_H - FL_BAR_TOP)}px"
                viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-            <path d="${path}" fill="none" stroke="${stroke}" stroke-opacity="${alpha}"
+            <path d="${path}" fill="none" stroke="${stroke}"
                   stroke-width="${FL_BAR_H}" stroke-linecap="butt"/>
           </svg>`;
 }
@@ -4643,14 +4631,14 @@ function flRender() {
         // than starting cold, then shades along its own burn from there.
         const parent = flData.sessions.find(p => p.session_id === s.forked_from.session_id);
         forkColor = flHeatAt(parent, peak, dv);
-        own += `;background:${flHeatGradient(s, peak)};opacity:1`;
+        own += `;background:${flHeatGradient(s, peak)}`;
       }
       // The heat gradient is positioned against the whole bar, so it is
       // carried onto every segment rather than restarting on each one.
-      bars = flSeg(dv, en, flHeat ? `;background:${flHeatGradient(s, peak)};opacity:1` : '');
+      bars = flSeg(dv, en, flHeat ? `;background:${flHeatGradient(s, peak)}` : '');
       link = flForkCurve(s, ox, clampBar, forkColor);
     } else {
-      bars = flSeg(st, en, flHeat ? `;background:${flHeatGradient(s, peak)};opacity:1` : '');
+      bars = flSeg(st, en, flHeat ? `;background:${flHeatGradient(s, peak)}` : '');
     }
 
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}"
