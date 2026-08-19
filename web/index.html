@@ -507,22 +507,35 @@ tr.clickable { cursor: pointer; }
 }
 .fl-mark.compact { color:var(--ev-compact); }
 
-/* Lane markers: key moments drawn on the bar itself, each in a disc so it
-   reads against the span behind it and stays legible where bars overlap.
-   Centred on the row rather than the bar's top edge. */
+/* Lane markers, drawn the way a transit map marks a stop: a ring in the
+   line's own colour, filled with the background so the line reads as passing
+   behind it rather than being interrupted. The ring is the line — which is
+   why it takes the row's colour rather than a per-event one, and why the icon
+   inside it is dim: the mark's job is to say "something happened here on this
+   line", and only then what.
+   --fl-line is set per row to whatever that session's bar is drawn in. */
 .fl-mark {
-  position:absolute; top:9px; transform:translateX(-50%); z-index:3;
-  width:16px; height:16px; border-radius:50%;
+  position:absolute; top:8px; transform:translateX(-50%);
+  width:18px; height:18px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
-  background:var(--bg-surface); border:1px solid currentColor;
-  cursor:pointer; z-index:2;
+  background:var(--bg-surface);
+  border:2.5px solid var(--fl-line, var(--accent));
+  box-sizing:border-box; cursor:pointer; z-index:4;
 }
-.fl-mark:hover { background:var(--bg-hover); }
-.fl-markic { width:9px; height:9px; display:block; }
+.fl-mark:hover {
+  background:var(--bg-hover);
+  /* A halo in the line's colour, so hover reads as the stop lighting up
+     rather than as a border change. */
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--fl-line, var(--accent)) 30%, transparent);
+}
+.fl-markic { width:9px; height:9px; display:block; color:var(--text-dim); }
 .fl-markic use { fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-.fl-mark.start { color:var(--yellow); }
-.fl-mark.end   { color:var(--text-dim); }
-.fl-mark.agent { color:var(--purple); }
+/* A terminus is drawn solid — a filled stop is how a transit map says the
+   line ends here rather than continuing off the edge. */
+.fl-mark.end {
+  background:var(--fl-line, var(--accent));
+}
+.fl-mark.end .fl-markic { color:var(--bg-surface); }
 
 .fl-forkic { width:10px; height:10px; flex-basis:10px; color:var(--teal); }
 .fl-forkic use { fill:none; stroke:currentColor; stroke-width:1.5; }
@@ -634,20 +647,26 @@ tr.clickable { cursor: pointer; }
    colour and weight — the same line, shown to be idling, rather than a
    different element. The dashes are a repeating gradient rather than a border
    so the bar keeps its exact height and radius. */
+/* The dash period is set per segment (--fl-dash), fitted so a whole number of
+   dashes spans it. A fixed period made a narrow lull show a single stub and a
+   wide one show thirty ticks; neither read as "the same line, idling". The
+   dash is always half the period, so the texture is identical at every width
+   and only its scale changes. */
 .fl-bar.idle {
   background:repeating-linear-gradient(90deg,
-    var(--accent) 0 5px, transparent 5px 10px);
-  opacity:.5; border-radius:0;
-}
-.fl-bar.idle.live {
-  background:repeating-linear-gradient(90deg,
-    var(--green) 0 5px, transparent 5px 10px);
+    var(--fl-line, var(--accent)) 0 calc(var(--fl-dash) * .5),
+    transparent calc(var(--fl-dash) * .5) var(--fl-dash));
+  opacity:.55; border-radius:0;
 }
 /* In heat view the segment's own background is the reading, so the dashes are
    cut out of it with a mask instead of painted over it. */
 .fl-row.heat .fl-bar.idle {
-  -webkit-mask:repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 10px);
-  mask:repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 10px);
+  -webkit-mask:repeating-linear-gradient(90deg,
+    #000 0 calc(var(--fl-dash) * .5),
+    transparent calc(var(--fl-dash) * .5) var(--fl-dash));
+  mask:repeating-linear-gradient(90deg,
+    #000 0 calc(var(--fl-dash) * .5),
+    transparent calc(var(--fl-dash) * .5) var(--fl-dash));
 }
 .fl-bar.live { background:var(--green); }
 
@@ -4306,6 +4325,26 @@ function flBurnFraction(s, maxRate) {
   return Math.min(1, Math.log10(1 + rate) / Math.log10(1 + maxRate));
 }
 
+// flDashPeriod picks a dash period that divides a segment evenly.
+//
+// A repeating gradient at a fixed period leaves a partial dash at the end of
+// any segment that is not a whole multiple of it, and on the narrow segments
+// that dominate a day-wide view that partial dash IS the segment. Fitting a
+// whole number of dashes instead means an idle stretch always reads as dashes
+// — three of them or thirty — rather than as one clipped stub.
+//
+// The target period is the ideal; the count is rounded to the nearest whole
+// number and the period recomputed from it, so the texture stays close to the
+// target while always closing cleanly.
+const FL_DASH_TARGET = 7;
+
+function flDashPeriod(widthPx) {
+  if (!(widthPx > 0)) return FL_DASH_TARGET;
+  // At least two dashes, or a narrow lull is a solid block that reads as work.
+  const n = Math.max(2, Math.round(widthPx / FL_DASH_TARGET));
+  return widthPx / n;
+}
+
 function flMark(id) {
   return `<svg class="fl-markic" viewBox="0 0 16 16"><use href="#${id}"/></svg>`;
 }
@@ -4506,12 +4545,19 @@ function flRender() {
           ` data-detail="${escHtml(c.detail || '')}">${flMark('ic-layers')}</span>`;
       }
     }
-    if (!s.is_running && en <= to) {
+    // Every line that has stopped gets a terminus, drawn at its last event.
+    // The condition used to also require the start to be in view, so a session
+    // running in from off-screen simply stopped mid-air.
+    if (!s.is_running && en >= from && en <= to) {
       marks += `<span class="fl-mark end" style="left:${x(en)}px"` +
         ` data-session="${escHtml(s.session_id)}" data-mark="end">${flMark('ic-flag')}</span>`;
     }
 
     const sel = s.session_id === tlSelected ? ' sel' : '';
+    // The colour every stop on this line is ringed in. A live session's line is
+    // green, so its stops are too — the marks belong to the line, not to a
+    // palette of their own.
+    const lineColor = s.is_running ? 'var(--green)' : 'var(--accent)';
     // In heat view the bar's colour carries the reading, so it is drawn
     // thicker and fully opaque; the state colours (live, selected) would
     // otherwise override the very thing being shown.
@@ -4552,8 +4598,10 @@ function flRender() {
         if (b < a) continue;
         const [px, pw] = clampBar(a, b);
         const cls = sp.kind === 'idle' ? ' idle' : '';
+        let style = `left:${px}px;width:${pw}px${extraStyle}`;
+        if (sp.kind === 'idle') style += `;--fl-dash:${flDashPeriod(pw)}px`;
         out += `<div class="fl-bar session${s.is_running ? ' live' : ''}${cls}"
-                     style="left:${px}px;width:${pw}px${extraStyle}"
+                     style="${style}"
                      data-session="${escHtml(s.session_id)}"
                      data-span="${escHtml(sp.kind)}"></div>`;
       }
@@ -4583,7 +4631,8 @@ function flRender() {
       bars = flSeg(st, en, flHeat ? `;background:${flHeatGradient(s, peak)};opacity:1` : '');
     }
 
-    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}" data-session="${escHtml(s.session_id)}">
+    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}"
+         style="--fl-line:${lineColor}" data-session="${escHtml(s.session_id)}">
       <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml(flLocation(s))}">
         <div class="fl-l1">${herdrIcon}${forkIcon}<span class="fl-name${inHerdr ? ' herdr' : ''}">${escHtml(label)}</span></div>
         <div class="fl-l2"><span class="fl-ctx">${ctx}</span><span class="fl-when">${meta}</span></div>

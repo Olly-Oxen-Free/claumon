@@ -25,23 +25,28 @@ import (
 //
 // The distinction between the last two is a judgement about intent, and the
 // thresholds below are where that judgement is made.
+// A session goes cold when its prompt cache expires, and the TTL that governs
+// that is not a constant — it is a property of the session, recorded in the
+// transcript. Every cached turn reports which bucket it wrote to:
+//
+//	"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":1385}
+//
+// so the threshold is read from the session rather than assumed for it. A
+// session that never cached, or whose transcript predates these fields, falls
+// back to the 5-minute default.
 const (
-	// coldAfter is how long a session must sit untouched before its line goes
-	// dashed. It tracks the prompt cache's default 5-minute TTL: past it, the
-	// context has to be re-read and the next message costs what a fresh one
-	// would. That is the moment a reader wants to see, because it is the
-	// moment resuming stops being free.
-	//
-	// Sessions configured for the 1-hour cache TTL will show dashed stretches
-	// that are in fact still warm. That is the safe direction to be wrong in:
-	// it under-claims warmth rather than promising it.
-	coldAfter = 5 * time.Minute
+	cold5m = 5 * time.Minute
+	cold1h = time.Hour
 
 	// breakAfter is how long a lull must run before the bar breaks outright.
-	// Half an hour is past any pause inside a working session — a meal, a
+	// Long enough to be past any pause inside a working session — a meal, a
 	// meeting, the end of a day — so a bar that resumes after one is showing a
 	// genuine return rather than a long think.
-	breakAfter = 30 * time.Minute
+	//
+	// This sits above the longest cache TTL by design: a break is a stronger
+	// claim than a cold cache, so it must not be reachable before the line has
+	// had the chance to go dashed first.
+	breakAfter = 90 * time.Minute
 )
 
 // SpanKind distinguishes a drawn stretch of a session's bar.
@@ -95,17 +100,22 @@ func Activity(path string, end time.Time, running bool) []Span {
 		}
 	}
 
-	stamps := readStamps(path)
-	spans := spansFrom(stamps, end, running)
+	stamps, cold := readStamps(path)
+	spans := spansFrom(stamps, end, running, cold)
 	activityCache.Store(path, activityEntry{size: info.Size(), spans: spans})
 	return spans
 }
 
-// readStamps pulls every event time out of a transcript, in file order.
-func readStamps(path string) []time.Time {
+// readStamps pulls every event time out of a transcript, in file order, and
+// the cache TTL the session was actually using.
+//
+// Both come from the same pass: the file is large and reading it twice to
+// learn two things about it would double the cost of the cheapest part of the
+// fleet build.
+func readStamps(path string) ([]time.Time, time.Duration) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, cold5m
 	}
 	defer f.Close()
 
@@ -113,9 +123,22 @@ func readStamps(path string) []time.Time {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
+	// Which TTL bucket this session writes to. Counted rather than taken from
+	// the first hit: a session can carry a few turns of the other kind, and
+	// the one it mostly uses is the one that governs how it goes cold.
+	key1h := []byte(`"ephemeral_1h_input_tokens":`)
+	key5m := []byte(`"ephemeral_5m_input_tokens":`)
+	var n1h, n5m int
+
 	var out []time.Time
 	for sc.Scan() {
 		b := sc.Bytes()
+		if j := bytes.Index(b, key1h); j >= 0 && nonZeroAfter(b[j+len(key1h):]) {
+			n1h++
+		}
+		if j := bytes.Index(b, key5m); j >= 0 && nonZeroAfter(b[j+len(key5m):]) {
+			n5m++
+		}
 		i := bytes.Index(b, key)
 		if i < 0 {
 			continue
@@ -131,7 +154,27 @@ func readStamps(path string) []time.Time {
 		}
 		out = append(out, t.UTC())
 	}
-	return out
+	if n1h > n5m {
+		return out, cold1h
+	}
+	return out, cold5m
+}
+
+// nonZeroAfter reports whether the number starting at b is anything but zero.
+// A turn that wrote no tokens to a bucket says nothing about which TTL the
+// session uses, and every cached turn reports both buckets.
+func nonZeroAfter(b []byte) bool {
+	for _, c := range b {
+		switch {
+		case c == '0':
+			continue
+		case c >= '1' && c <= '9':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // spansFrom reduces ordered event times to drawn spans.
@@ -140,7 +183,7 @@ func readStamps(path string) []time.Time {
 // so stamps are not guaranteed to be sorted; they are walked in order and any
 // stamp that moves backwards is skipped rather than opening a span that ends
 // before it starts.
-func spansFrom(stamps []time.Time, end time.Time, running bool) []Span {
+func spansFrom(stamps []time.Time, end time.Time, running bool, coldAfter time.Duration) []Span {
 	if len(stamps) == 0 {
 		return nil
 	}

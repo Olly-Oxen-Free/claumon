@@ -11,7 +11,7 @@ func actAt(mins int) time.Time {
 
 func TestContinuousWorkIsOneSpan(t *testing.T) {
 	stamps := []time.Time{actAt(0), actAt(1), actAt(2), actAt(3)}
-	spans := spansFrom(stamps, actAt(3), false)
+	spans := spansFrom(stamps, actAt(3), false, cold5m)
 	if len(spans) != 1 {
 		t.Fatalf("got %d spans, want 1: %+v", len(spans), spans)
 	}
@@ -24,7 +24,7 @@ func TestCacheColdLullIsBridgedDashed(t *testing.T) {
 	// Ten minutes of nothing: past the cache TTL, well short of abandonment.
 	// The line stays continuous but the lull is marked.
 	stamps := []time.Time{actAt(0), actAt(2), actAt(12), actAt(14)}
-	spans := spansFrom(stamps, actAt(14), false)
+	spans := spansFrom(stamps, actAt(14), false, cold5m)
 	if len(spans) != 3 {
 		t.Fatalf("got %d spans, want 3: %+v", len(spans), spans)
 	}
@@ -38,10 +38,10 @@ func TestCacheColdLullIsBridgedDashed(t *testing.T) {
 }
 
 func TestLongAbsenceBreaksTheLine(t *testing.T) {
-	// An hour away: the session was put down and picked back up. The bar must
-	// actually break, not bridge.
-	stamps := []time.Time{actAt(0), actAt(2), actAt(62), actAt(64)}
-	spans := spansFrom(stamps, actAt(64), false)
+	// Two hours away: the session was put down and picked back up. The bar
+	// must actually break, not bridge.
+	stamps := []time.Time{actAt(0), actAt(2), actAt(122), actAt(124)}
+	spans := spansFrom(stamps, actAt(124), false, cold5m)
 	if len(spans) != 2 {
 		t.Fatalf("got %d spans, want 2: %+v", len(spans), spans)
 	}
@@ -50,14 +50,14 @@ func TestLongAbsenceBreaksTheLine(t *testing.T) {
 			t.Errorf("span %+v should be active; a break is drawn as absence, not as a span", s)
 		}
 	}
-	if !spans[0].To.Equal(actAt(2)) || !spans[1].From.Equal(actAt(62)) {
+	if !spans[0].To.Equal(actAt(2)) || !spans[1].From.Equal(actAt(122)) {
 		t.Errorf("break is in the wrong place: %+v", spans)
 	}
 }
 
 func TestOpenSessionGoneQuietGetsIdleTail(t *testing.T) {
 	stamps := []time.Time{actAt(0), actAt(2)}
-	spans := spansFrom(stamps, actAt(40), true)
+	spans := spansFrom(stamps, actAt(40), true, cold5m)
 	if len(spans) != 2 {
 		t.Fatalf("got %d spans, want 2: %+v", len(spans), spans)
 	}
@@ -71,7 +71,7 @@ func TestClosedSessionGetsNoTail(t *testing.T) {
 	// A session that has ended is not idle, it is over. Drawing a dashed tail
 	// to now would claim it is still open.
 	stamps := []time.Time{actAt(0), actAt(2)}
-	spans := spansFrom(stamps, actAt(40), false)
+	spans := spansFrom(stamps, actAt(40), false, cold5m)
 	if len(spans) != 1 {
 		t.Fatalf("got %d spans, want 1: %+v", len(spans), spans)
 	}
@@ -80,7 +80,7 @@ func TestClosedSessionGetsNoTail(t *testing.T) {
 func TestBriefQuietOpenSessionStaysSolid(t *testing.T) {
 	// Under the cache TTL: still warm, so nothing is marked.
 	stamps := []time.Time{actAt(0), actAt(2)}
-	spans := spansFrom(stamps, actAt(4), true)
+	spans := spansFrom(stamps, actAt(4), true, cold5m)
 	if len(spans) != 1 || spans[0].Kind != SpanActive {
 		t.Fatalf("got %+v, want one active span", spans)
 	}
@@ -90,7 +90,7 @@ func TestOutOfOrderStampsDoNotInvertSpans(t *testing.T) {
 	// A split session replays its parent's history, so stamps can move
 	// backwards. No span may end before it starts.
 	stamps := []time.Time{actAt(0), actAt(50), actAt(10), actAt(52)}
-	spans := spansFrom(stamps, actAt(52), false)
+	spans := spansFrom(stamps, actAt(52), false, cold5m)
 	for _, s := range spans {
 		if s.To.Before(s.From) {
 			t.Fatalf("inverted span: %+v", s)
@@ -99,7 +99,41 @@ func TestOutOfOrderStampsDoNotInvertSpans(t *testing.T) {
 }
 
 func TestNoStampsNoSpans(t *testing.T) {
-	if spans := spansFrom(nil, actAt(10), true); spans != nil {
+	if spans := spansFrom(nil, actAt(10), true, cold5m); spans != nil {
 		t.Fatalf("got %+v, want nil", spans)
+	}
+}
+
+func TestColdThresholdFollowsTheSessionsTTL(t *testing.T) {
+	// A ten-minute lull is cold on a 5-minute cache and still warm on an
+	// hour-long one. The same stamps must read differently depending on which
+	// TTL the session was actually using.
+	stamps := []time.Time{actAt(0), actAt(2), actAt(12), actAt(14)}
+
+	short := spansFrom(stamps, actAt(14), false, cold5m)
+	if len(short) != 3 || short[1].Kind != SpanIdle {
+		t.Fatalf("on a 5m cache this lull is cold: %+v", short)
+	}
+
+	long := spansFrom(stamps, actAt(14), false, cold1h)
+	if len(long) != 1 || long[0].Kind != SpanActive {
+		t.Fatalf("on a 1h cache this lull is still warm: %+v", long)
+	}
+}
+
+func TestNonZeroAfter(t *testing.T) {
+	cases := map[string]bool{
+		"1385,": true,
+		"0,":    false,
+		"0}":    false,
+		"00,":   false,
+		"907}":  true,
+		"":      false,
+		"null,": false,
+	}
+	for in, want := range cases {
+		if got := nonZeroAfter([]byte(in)); got != want {
+			t.Errorf("nonZeroAfter(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
