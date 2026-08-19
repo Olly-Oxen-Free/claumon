@@ -447,18 +447,22 @@ tr.clickable { cursor: pointer; }
 .ic-err   { color:var(--red); }
 .ic-mcp   { color:var(--teal); }
 
-/* Lane markers: key moments drawn on the bar itself. */
+/* Lane markers: key moments drawn on the bar itself, each in a disc so it
+   reads against the span behind it and stays legible where bars overlap.
+   Centred on the row rather than the bar's top edge. */
 .fl-mark {
-  position:absolute; top:3px; transform:translateX(-50%);
-  line-height:0; pointer-events:auto; cursor:default; z-index:1;
+  position:absolute; top:4px; transform:translateX(-50%);
+  width:16px; height:16px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg-surface); border:1px solid currentColor;
+  cursor:pointer; z-index:2;
 }
-.fl-mark.agent { cursor:pointer; }
-.fl-markic { width:11px; height:11px; }
-.fl-markic use { fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.fl-mark:hover { background:var(--bg-hover); }
+.fl-markic { width:9px; height:9px; display:block; }
+.fl-markic use { fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .fl-mark.start { color:var(--yellow); }
 .fl-mark.end   { color:var(--text-dim); }
 .fl-mark.agent { color:var(--purple); }
-.fl-mark.agent:hover .fl-markic { stroke-width:2.2; }
 
 .fl-pane {
   background:none; border:1px solid var(--border); border-radius:4px;
@@ -511,12 +515,14 @@ tr.clickable { cursor: pointer; }
 .fl-tick { display:none; }
 .fl-grid { position:absolute; top:0; bottom:0; width:1px; background:var(--border); opacity:.5; }
 .fl-now { position:absolute; top:0; bottom:0; width:1px; background:var(--green); opacity:.8; }
+/* A span is context, not the subject: thin and low-contrast so the markers
+   sitting on it are what the eye lands on. */
 .fl-bar {
-  position:absolute; top:6px; height:12px; border-radius:3px; cursor:pointer;
-  background:var(--accent); opacity:.85; min-width:3px;
+  position:absolute; top:10px; height:5px; border-radius:3px; cursor:pointer;
+  background:var(--accent); opacity:.45; min-width:3px;
 }
-.fl-bar:hover { opacity:1; outline:1px solid var(--text); }
-.fl-bar.agent { background:var(--purple); top:8px; height:8px; }
+.fl-bar:hover { opacity:.8; }
+.fl-bar.agent { background:var(--purple); top:11px; height:3px; }
 .fl-bar.live { background:var(--green); }
 
 /* The ruler is its own row so labels are not repeated per lane. */
@@ -556,7 +562,8 @@ tr.clickable { cursor: pointer; }
 .tl-row.open { background:var(--bg-hover); }
 .tl-body { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tl-expand { background:var(--bg); border-left:2px solid var(--accent); }
-.tl-expand.d1 { margin-left:30px; }
+.tl-expand.d0 { margin-left:0; }
+.tl-expand.d1 { margin-left:22px; }
 .tl-outlabel {
   font-size:10px; color:var(--text-dim); text-transform:uppercase;
   letter-spacing:.05em; padding:6px 10px 0;
@@ -579,16 +586,28 @@ tr.clickable { cursor: pointer; }
 .tl-total .k { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; }
 .tl-list { display:flex; flex-direction:column; }
 .tl-row {
+  position:relative;
   display:grid; grid-template-columns:64px 20px 1fr auto auto;
   gap:10px; align-items:baseline; padding:6px 8px;
-  border-left:2px solid var(--border); font-size:13px;
+  font-size:13px;
 }
 .tl-row + .tl-row { border-top:1px solid var(--border); }
-.tl-row.tool { border-left-color:var(--accent); }
-.tl-row.subagent { border-left-color:var(--purple); cursor:pointer; }
-.tl-row.subagent:hover { background:rgba(167,139,250,.08); }
-.tl-row.err { border-left-color:var(--red); }
-.tl-row.prompt { border-left-color:var(--teal); }
+
+/* The rail is drawn as a pseudo-element rather than border-left so it can sit
+   at the row's own indent. A rail pinned to the container edge said nothing
+   about depth — every row's line was in the same place. */
+.tl-row::before {
+  content:''; position:absolute; top:0; bottom:0; width:2px;
+  left:var(--rail, 0px); background:var(--border);
+}
+.tl-row.d0 { --rail:0px; }
+.tl-row.d1 { --rail:22px; }
+.tl-row.tool::before { background:var(--accent); }
+.tl-row.subagent { cursor:pointer; }
+.tl-row.subagent::before { background:var(--purple); }
+.tl-row.subagent:hover { background:rgba(184,154,218,.08); }
+.tl-row.err::before { background:var(--red); }
+.tl-row.prompt::before { background:var(--teal); }
 .tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; }
 .tl-glyph { text-align:center; }
 .tl-title { font-weight:600; }
@@ -3875,16 +3894,18 @@ function flRender() {
     // Key moments are marked on the bar itself, so a spawn or a finish is
     // visible without opening the row. Agents spawning is the one that
     // matters most: it is where a session's cost and time multiply.
-    let marks = `<span class="fl-mark start" style="left:${x(st)}px" title="session start">${flMark('ic-rocket')}</span>`;
+    let marks = `<span class="fl-mark start" style="left:${x(st)}px"` +
+      ` data-session="${escHtml(s.session_id)}" data-mark="start">${flMark('ic-rocket')}</span>`;
     for (const a of agents) {
       const at = new Date(a.started_at).getTime();
       if (at < from || at > to) continue;
       marks += `<span class="fl-mark agent" style="left:${x(at)}px"` +
         ` data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"` +
-        ` title="${escHtml((a.agent_type || 'subagent') + ' spawned')}">${flMark('ic-bot')}</span>`;
+        ` data-mark="spawn">${flMark('ic-bot')}</span>`;
     }
     if (!s.is_running && en <= to) {
-      marks += `<span class="fl-mark end" style="left:${x(en)}px" title="session end">${flMark('ic-flag')}</span>`;
+      marks += `<span class="fl-mark end" style="left:${x(en)}px"` +
+        ` data-session="${escHtml(s.session_id)}" data-mark="end">${flMark('ic-flag')}</span>`;
     }
 
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}" data-session="${escHtml(s.session_id)}">
@@ -3978,12 +3999,26 @@ function flBindRows(host) {
         .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
     }));
 
-  // A spawn marker opens that agent, same as clicking its bar.
-  host.querySelectorAll('.fl-mark.agent').forEach(el =>
-    el.addEventListener('click', ev => {
-      ev.stopPropagation();
-      flOpenAgent(el.dataset.session, el.dataset.agent);
-    }));
+  // A marker describes the moment it sits on, not the session it belongs to:
+  // hovering a spawn should answer "what was spawned here", which the session
+  // tooltip cannot.
+  host.querySelectorAll('.fl-mark').forEach(el => {
+    el.addEventListener('mouseenter', ev => {
+      const s = flData.sessions.find(x => x.session_id === el.dataset.session);
+      if (!s) return;
+      tip.innerHTML = flMarkTipHtml(s, el.dataset.mark, el.dataset.agent);
+      tip.style.display = 'block';
+      flPlaceTip(ev);
+    });
+    el.addEventListener('mousemove', flPlaceTip);
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    if (el.dataset.mark === 'spawn') {
+      el.addEventListener('click', ev => {
+        ev.stopPropagation();
+        flOpenAgent(el.dataset.session, el.dataset.agent);
+      });
+    }
+  });
 
   host.querySelectorAll('.fl-label').forEach(el => {
     const row = el.closest('.fl-row');
@@ -4050,6 +4085,46 @@ function flPlaceTip(ev) {
   if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
   tip.style.left = Math.max(4, x) + 'px';
   tip.style.top = Math.max(4, y) + 'px';
+}
+
+// Describes one marked moment.
+function flMarkTipHtml(s, mark, agentId) {
+  const sessionStart = new Date(s.started_at);
+  const fmt = t => new Date(t).toLocaleString([], {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  if (mark === 'spawn') {
+    const a = (s.agents || []).find(y => y.agent_id === agentId);
+    if (!a) return '';
+    const start = new Date(a.started_at);
+    const rows = [
+      ['agent', a.agent_type || 'subagent'],
+      ['spawned', fmt(start)],
+      // How far into the session it started, which is what the marker's
+      // position on the bar is showing.
+      ['at', (fmtDur(start - sessionStart) || '0s') + ' into the session'],
+      ['ran for', fmtDur(new Date(a.ended_at) - start) || '—'],
+      ['in', s.repo || '—'],
+    ];
+    if (a.spawn_depth) rows.push(['depth', a.spawn_depth]);
+    return `<h4>agent spawned</h4>` +
+      (a.description ? `<div class="sub">${escHtml(a.description)}</div>` : '') +
+      '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+  }
+
+  const isStart = mark === 'start';
+  const when = isStart ? s.started_at : s.ended_at;
+  const rows = [
+    [isStart ? 'started' : 'ended', fmt(when)],
+    ['repo', s.repo || '—'],
+    ['ran for', fmtDur(new Date(s.ended_at) - sessionStart) || '—'],
+    ['agents', (s.agents || []).length],
+    ['cost', '$' + (s.cost_usd || 0).toFixed(2)],
+  ];
+  if (s.herdr) rows.push(['pane', s.herdr.pane_id]);
+  return `<h4>session ${isStart ? 'start' : 'end'}</h4>` +
+    (s.title ? `<div class="sub">${escHtml(s.title)}</div>` : '') +
+    '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
 }
 
 function flTipHtml(s, agent) {
