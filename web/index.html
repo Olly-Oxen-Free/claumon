@@ -661,8 +661,9 @@ tr.clickable { cursor: pointer; }
    session's cold stretch still dashes. The two rules have equal specificity,
    so .live sitting below this one silently repainted every cold stretch solid
    green — a running process with a cold context looked like continuous work,
-   which is exactly the case the dashes exist to show. The colour comes from
-   --fl-line, which is already green on those rows, so nothing is lost. */
+   which is exactly the case the dashes exist to show.
+   The dash colour comes from --fl-line: the line's own colour normally, and
+   the heat ramp's zero when heat is on, which the renderer sets per segment. */
 .fl-bar.idle {
   background:repeating-linear-gradient(90deg,
     var(--fl-line, var(--accent)) 0 calc(var(--fl-dash) * .5),
@@ -4617,8 +4618,19 @@ function flRender() {
         // were, and painting it warm claimed demand that never happened — the
         // gradient interpolates across it, so the busier the work on either
         // side, the hotter the lull looked.
+        //
+        // In heat view the cold stretch takes the ramp's own zero rather than
+        // the line's colour: heat replaces the palette entirely, so a stretch
+        // reverting to accent orange mid-gradient read as another temperature
+        // instead of as the absence of one. Checked against the data — every
+        // bucket falling inside an idle span carries exactly zero tokens, in
+        // every session — so the ramp's zero is the honest colour here, not an
+        // approximation of one.
         let style = `left:${px}px;width:${pw}px${idle ? '' : extraStyle}`;
-        if (idle) style += `;--fl-dash:${flDashPeriod(pw)}px`;
+        if (idle) {
+          style += `;--fl-dash:${flDashPeriod(pw)}px`;
+          if (flHeat) style += `;--fl-line:${FL_HEAT_STOPS[0][1]}`;
+        }
         out += `<div class="fl-bar session${s.is_running ? ' live' : ''}${cls}"
                      style="${style}"
                      data-session="${escHtml(s.session_id)}"
