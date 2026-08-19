@@ -96,6 +96,109 @@ claumon reads credentials from `~/.claude/.credentials.json` (created by `claude
 | `--port` | Override the dashboard port (default from config) |
 | `--db` | Override the DB path (e.g. a copy, to run a test instance) |
 
+## Fork additions
+
+This fork adds four things upstream does not have. All four are off by default and
+configured in `~/.claumon/config.json`.
+
+### Forecast-risk alerts
+
+Upstream shows you a projection; this fork can tell you about it. An alert fires when
+the forecast projects a window past its cap **before** the window resets — which
+happens while current usage is still well below the cap, and that lead time is the
+whole point.
+
+This deliberately does not alert on the current percentage ("you are at 80%").
+Threshold, reset, and schedule-change alerting is a different job, handled by a
+separate watcher; duplicating it here produces two popups for one fact. What claumon
+uniquely knows is the projection.
+
+Two levels: `at_risk` when the central projection clears the cap, `likely` when even
+the lower bound of the 80% credible interval does. An escalation from the first to
+the second alerts once more; nothing else repeats within a window.
+
+```jsonc
+{
+  "alerts": {
+    "enabled": true,
+    "cap_pct": 100,          // projection must clear this
+    "desktop": true,         // notify-send
+    "webhook_url": "",       // optional JSON POST
+    "gauges": ["weekly"]     // optional; omit for all
+  }
+}
+```
+
+### Live session status
+
+Reads the per-session state files under `~/.claude/statusbar/state.d/`, written by a
+Claude Code hook on every lifecycle event, and reports which sessions are **working**,
+**waiting** on a permission answer, **idle**, or **done**.
+
+Transcript parsing — which is what upstream's `/api/sessions` does — can say what a
+session has done, never what it is doing right now; nothing is written to the
+transcript mid-turn. The hook state files can.
+
+The state layout originates with [m1ckc3s/claude-status-bar](https://github.com/m1ckc3s/claude-status-bar)
+and is shared with the NirvanaOS bar chip, so one hook install feeds both. With no
+hooks installed the directory does not exist, the endpoint returns an empty list, and
+nothing else changes.
+
+Exposed at `GET /api/live`, and pushed over SSE as a `live` event whenever a
+transcript changes.
+
+### Anomaly detection
+
+Two detectors, for the two ways an agent session goes wrong quietly:
+
+- **Burn-rate spikes** — a window consuming far faster than your own recent baseline.
+  Scored with a median/MAD modified z-score rather than mean and standard deviation:
+  one runaway session moves a mean enough to hide itself, while the median barely
+  shifts, so a second spike is still caught after a first.
+- **Tool loops** — an agent repeating the same 1-to-4 call cycle with no progress.
+  Only the tail of the call sequence is examined, so a session that looped earlier and
+  recovered is not reported.
+
+```jsonc
+{
+  "anomaly_enabled": true,
+  "anomaly": {
+    "z_threshold": 3.5,   // conventional modified z-score cutoff
+    "min_samples": 8,     // no scoring against a baseline smaller than this
+    "loop_window": 24,    // trailing tool calls examined
+    "loop_repeats": 4     // cycles before it counts as a loop
+  }
+}
+```
+
+Findings are logged and served at `GET /api/anomalies`.
+
+### OpenTelemetry export
+
+Pushes utilization, projected utilization, burn rate, and live session counts to an
+OTLP/HTTP collector, so claumon's numbers reach an existing Grafana without running a
+separate four-container observability stack next to it.
+
+The OTLP JSON is written by hand rather than pulled from the OpenTelemetry SDK: that
+SDK is a large dependency tree, and claumon ships as one static binary with no runtime
+requirements. The payload is a few nested structs, pinned by a golden test.
+
+```jsonc
+{
+  "otel": {
+    "enabled": true,
+    "endpoint": "http://localhost:4318",
+    "interval_seconds": 60,
+    "service_name": "claumon",
+    "headers": { "Authorization": "Bearer ..." }
+  }
+}
+```
+
+Metric names use the `gen_ai.*` semantic conventions where one fits, and a `claumon.*`
+prefix where none does — utilization against a subscription's rate limits has no
+convention.
+
 ## Run as a background service
 
 Run claumon automatically on login so the dashboard is always available. First, move the binary to a permanent location, then register the service.

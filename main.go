@@ -18,10 +18,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fabioconcina/claumon/internal/alert"
+	"github.com/fabioconcina/claumon/internal/anomaly"
 	"github.com/fabioconcina/claumon/internal/api"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
 	"github.com/fabioconcina/claumon/internal/memory"
+	"github.com/fabioconcina/claumon/internal/otel"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/pricing"
 	"github.com/fabioconcina/claumon/internal/server"
@@ -43,6 +46,17 @@ type Config struct {
 	RetentionDays      int                             `json:"retention_days"`
 	PricingOverrides   map[string]pricing.ModelPricing `json:"pricing_overrides,omitempty"`
 	StuckThresholdMins int                             `json:"stuck_threshold_minutes"`
+
+	// Alerts warns when the forecast projects a window past its cap. Off by
+	// default; threshold alerting is intentionally not duplicated here (see
+	// package internal/alert).
+	Alerts alert.Config `json:"alerts"`
+	// AnomalyEnabled turns on burn-rate spike and tool-loop detection.
+	AnomalyEnabled bool `json:"anomaly_enabled"`
+	// Anomaly tunes those detectors.
+	Anomaly anomaly.Config `json:"anomaly"`
+	// OTel pushes metrics to an OpenTelemetry collector. Off by default.
+	OTel otel.Config `json:"otel"`
 }
 
 func defaultConfig() Config {
@@ -54,6 +68,9 @@ func defaultConfig() Config {
 		ClaudeDir:        filepath.Join(home, ".claude"),
 		DBPath:           filepath.Join(home, ".claumon", "usage.db"),
 		RetentionDays:    90,
+		Alerts:           alert.DefaultConfig(),
+		Anomaly:          anomaly.DefaultConfig(),
+		OTel:             otel.DefaultConfig(),
 	}
 }
 
@@ -89,6 +106,15 @@ func loadConfig() Config {
 	}
 	if cfg.StuckThresholdMins == 0 {
 		cfg.StuckThresholdMins = 10
+	}
+	if cfg.Alerts.CapPct == 0 {
+		cfg.Alerts.CapPct = defaults.Alerts.CapPct
+	}
+	if cfg.OTel.Endpoint == "" {
+		cfg.OTel.Endpoint = defaults.OTel.Endpoint
+	}
+	if cfg.OTel.IntervalSecs == 0 {
+		cfg.OTel.IntervalSecs = defaults.OTel.IntervalSecs
 	}
 	return cfg
 }
@@ -167,6 +193,12 @@ func main() {
 	srv.Handlers.Forecast = fcSvc
 	go fcSvc.RefitAll(time.Now())
 
+	// Forecast-risk alerts, anomaly detection, live-session status, and the
+	// OTLP exporter. All four are off unless configured; see observability.go.
+	obs := newObservability(cfg)
+	srv.Handlers.LiveSessions = obs.LiveSessions
+	srv.Handlers.Anomalies = obs.Findings
+
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -177,7 +209,7 @@ func main() {
 	// Start usage poller (provider handles credential reload on expiry)
 	if provider.HasToken() {
 		apiClient := api.NewClient(provider)
-		go pollUsage(ctx, apiClient, provider, st, srv.Broker, srv.Handlers, fcSvc, time.Duration(cfg.PollIntervalSecs)*time.Second)
+		go pollUsage(ctx, apiClient, provider, st, srv.Broker, srv.Handlers, fcSvc, obs, time.Duration(cfg.PollIntervalSecs)*time.Second)
 	}
 
 	// Start file watcher
@@ -193,6 +225,10 @@ func main() {
 				parser.EnrichSessionsWithProcessStatus(sessions, cfg.ClaudeDir, stuckThreshold)
 				srv.Broker.SendJSON("sessions", sessions)
 			}
+			// Live status changes on the same events that change a
+			// transcript, so push it on the same trigger.
+			srv.Broker.SendJSON("live", obs.LiveSessions())
+			go obs.scanSessionsForLoops(cfg.ClaudeDir, time.Now())
 			// Update daily aggregate
 			updateDailyAggregate(cfg.ClaudeDir, st)
 		})
@@ -341,7 +377,7 @@ func checkUpdates(ctx context.Context, current string, handlers *server.Handlers
 	}
 }
 
-func pollUsage(ctx context.Context, client *api.Client, provider *auth.Provider, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, interval time.Duration) {
+func pollUsage(ctx context.Context, client *api.Client, provider *auth.Provider, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, obs *observability, interval time.Duration) {
 	// Resume the poll cadence across restarts rather than always polling a few
 	// seconds after start. The poller's backoff is in-memory only, so without
 	// this a burst of restarts each fires an immediate poll and trips the usage
@@ -366,6 +402,7 @@ func pollUsage(ctx context.Context, client *api.Client, provider *auth.Provider,
 	}
 	p := &poller{
 		client: client, provider: provider, st: st, broker: broker, handlers: handlers, forecast: fcSvc,
+		obs:      obs,
 		interval: interval, backoff: interval, lastAuthOK: true,
 	}
 
@@ -387,6 +424,7 @@ type poller struct {
 	broker      *server.SSEBroker
 	handlers    *server.Handlers
 	forecast    *forecast.Service
+	obs         *observability
 	interval    time.Duration
 	backoff     time.Duration
 	lastAuthOK  bool
@@ -424,7 +462,7 @@ func (p *poller) fetch(ctx context.Context) {
 		p.authWaiting = false
 	}
 
-	err := fetchAndBroadcastUsage(ctx, p.client, p.st, p.broker, p.handlers, p.forecast)
+	err := fetchAndBroadcastUsage(ctx, p.client, p.st, p.broker, p.handlers, p.forecast, p.obs)
 	p.lastAuthOK = broadcastAuthStatus(p.provider, p.broker, p.lastAuthOK)
 	if err == nil {
 		p.backoff = p.interval
@@ -475,7 +513,7 @@ func retryBackoff(err error, defaultBackoff time.Duration) time.Duration {
 	return defaultBackoff
 }
 
-func fetchAndBroadcastUsage(ctx context.Context, client *api.Client, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service) error {
+func fetchAndBroadcastUsage(ctx context.Context, client *api.Client, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, obs *observability) error {
 	usage, err := client.FetchUsage(ctx)
 	if err != nil {
 		log.Printf("[poll] Usage fetch error: %v", err)
@@ -493,6 +531,9 @@ func fetchAndBroadcastUsage(ctx context.Context, client *api.Client, st *store.S
 	broker.SendJSON("usage", evt)
 	handlers.SetLatestUsage(evt)
 	log.Printf("[poll] Usage: session=%.1f%% weekly=%.1f%%", usage.SessionPercent, usage.WeeklyPercent)
+	if obs != nil {
+		obs.onUsage(ctx, evt, time.Now())
+	}
 	return nil
 }
 

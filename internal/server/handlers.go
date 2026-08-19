@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fabioconcina/claumon/internal/anomaly"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/live"
 	"github.com/fabioconcina/claumon/internal/memory"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
@@ -30,6 +32,15 @@ type Handlers struct {
 	RateLimitTier    string
 	StuckThreshold   time.Duration
 	Forecast         *forecast.Service
+
+	// LiveSessions reports Claude Code sessions that are running right now,
+	// from the hook-written state files. Nil when the feature is unavailable;
+	// the endpoint then returns an empty list rather than an error, because a
+	// machine with no hooks installed is a supported configuration.
+	LiveSessions func() []live.Session
+	// Anomalies reports recent burn-rate spikes and tool loops. Nil when
+	// detection is off.
+	Anomalies func() []anomaly.Finding
 
 	ReleasesURL     string
 	updateMu        sync.RWMutex
@@ -517,4 +528,36 @@ func writeJSONError(w http.ResponseWriter, msg string, status int) {
 	setJSONHeaders(w)
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// HandleLive lists the Claude Code sessions running right now.
+//
+// This is distinct from /api/sessions, which reports what sessions have done
+// by parsing their transcripts. A transcript cannot say whether a session is
+// mid-turn or waiting on a permission answer; the hook-written state files can.
+func (h *Handlers) HandleLive(w http.ResponseWriter, r *http.Request) {
+	sessions := []live.Session{}
+	if h.LiveSessions != nil {
+		if got := h.LiveSessions(); got != nil {
+			sessions = got
+		}
+	}
+	writeJSON(w, map[string]any{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+// HandleAnomalies lists recent burn-rate spikes and tool loops.
+func (h *Handlers) HandleAnomalies(w http.ResponseWriter, r *http.Request) {
+	findings := []anomaly.Finding{}
+	if h.Anomalies != nil {
+		if got := h.Anomalies(); got != nil {
+			findings = got
+		}
+	}
+	writeJSON(w, map[string]any{
+		"findings": findings,
+		"count":    len(findings),
+	})
 }
