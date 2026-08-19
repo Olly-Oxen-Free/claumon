@@ -96,6 +96,33 @@ claumon reads credentials from `~/.claude/.credentials.json` (created by `claude
 | `--port` | Override the dashboard port (default from config) |
 | `--db` | Override the DB path (e.g. a copy, to run a test instance) |
 
+## Remote access over Tailscale
+
+claumon stays bound to loopback. Reaching it from another device goes through
+`tailscale serve`, which is the authenticated reverse proxy upstream recommends
+rather than publishing the port:
+
+```bash
+sudo tailscale set --operator=$USER          # once, so serve needs no sudo
+tailscale serve --bg --https=8443 http://127.0.0.1:3131
+```
+
+That publishes `https://<machine>.<tailnet>.ts.net:8443` to the **tailnet only** —
+Tailscale terminates TLS with the node's own certificate, and access is whatever
+your tailnet ACLs already allow.
+
+A dedicated HTTPS port rather than a path prefix, for two reasons: port 443's
+root path is often already proxying something else, and the dashboard fetches
+absolute paths (`/api/...`), so mounting it under `/claumon` would send its own
+API calls to whatever owns the root.
+
+Mutating endpoints keep working through the proxy because the same-origin guard
+honours `X-Forwarded-Proto` and `X-Forwarded-Host`, which `tailscale serve` sets.
+
+**Do not enable Funnel.** That would publish the same URL to the open internet,
+and this dashboard exposes session transcripts, memory files, and process
+controls with no authentication of its own.
+
 ## Building this fork
 
 ```bash
