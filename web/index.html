@@ -617,6 +617,20 @@ tr.clickable { cursor: pointer; }
 
 .tl-listbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .tl-listtitle { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; margin-right:4px; }
+/* Filter chip in the event list's header. */
+.tl-chip {
+  display:inline-flex; align-items:center; gap:5px;
+  background:var(--bg-surface); border:1px solid var(--purple);
+  border-radius:11px; padding:1px 4px 1px 7px; font-size:11px; margin-right:6px;
+}
+.tl-chip-name { color:var(--text-bright); max-width:180px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.tl-chip-x {
+  background:none; border:none; color:var(--text-dim); cursor:pointer;
+  font-size:11px; line-height:1; padding:2px 3px; border-radius:8px;
+}
+.tl-chip-x:hover { color:var(--text-bright); background:var(--bg-hover); }
+
 .tl-sortdir { display:inline-flex; align-items:center; padding:3px 7px; }
 .tl-arrow { width:12px; height:12px; transition:transform .18s ease; }
 .tl-arrow use { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
@@ -1416,6 +1430,7 @@ tr.clickable { cursor: pointer; }
     <div class="tl-graph" id="tl-graph"></div>
     <div class="tl-tip" id="tl-tip"></div>
     <div class="tl-listbar">
+      <span id="tl-filterchip"></span>
       <span class="tl-listtitle">Events</span>
       <button class="fl-btn tl-sortdir" id="tl-sortdir" title="newest first — click to reverse">
         <svg class="tl-arrow" viewBox="0 0 16 16"><use href="#ic-arrow-down"/></svg>
@@ -4047,6 +4062,26 @@ function flForkCurve(child, childBarX, clampBar, colorOverride) {
           </svg>`;
 }
 
+// The filter, named where its effect is felt. The map has its own clear button,
+// but the event list is the thing being narrowed, so it says so too — and can be
+// released from here without going back up to the chart.
+function tlRenderFilterChip() {
+  const host = document.getElementById('tl-filterchip');
+  if (!host) return;
+  if (!flFocused || !flData) { host.innerHTML = ''; return; }
+  const s = flData.sessions.find(x => x.session_id === flFocused);
+  const label = (s && (s.repo || s.title)) || flFocused.slice(0, 8);
+  const full = s ? (s.title || s.cwd || flFocused) : flFocused;
+  host.innerHTML = `<span class="tl-chip" title="${escHtml(full)}">` +
+    `<svg class="ev-ic ic-agent" viewBox="0 0 16 16"><use href="#ic-fork"/></svg>` +
+    `<span class="tl-chip-name">${escHtml(label)}</span>` +
+    `<button class="tl-chip-x" title="clear the filter">✕</button></span>`;
+  host.querySelector('.tl-chip-x').addEventListener('click', () => {
+    flFocused = null;
+    flRender();
+  });
+}
+
 function flOrderByLineage(sessions) {
   const present = new Set(sessions.map(s => s.session_id));
   const kids = new Map();
@@ -4422,6 +4457,7 @@ function flRender() {
 
   flBindControls(host);
   flBindRows(host);
+  tlRenderFilterChip();
 
   // Open at the right-hand edge, which is the end of the window. Sessions are
   // listed newest first, so a left-aligned scroll hides exactly the rows the
