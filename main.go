@@ -756,6 +756,17 @@ func runUpdate() {
 		return
 	}
 
+	// Self-update pulls upstream's release binary. On a fork build that would
+	// silently discard the local changes this binary was built for, so refuse
+	// and say how to update properly.
+	if updater.IsFork(version) {
+		fmt.Printf("New upstream release: %s (this build is %s)\n", rel.TagName, version)
+		fmt.Println("\nRefusing to self-update: that would replace this fork with upstream's binary.")
+		fmt.Println("Merge it in your checkout instead:")
+		fmt.Println("  git fetch upstream && git merge " + rel.TagName + " && go build")
+		os.Exit(1)
+	}
+
 	fmt.Printf("New version available: %s → %s\n", version, rel.TagName)
 	newVersion, err := updater.Update(rel)
 	if err != nil {

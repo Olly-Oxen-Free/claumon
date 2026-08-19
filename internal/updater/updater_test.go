@@ -37,3 +37,47 @@ func TestNeedsUpdate(t *testing.T) {
 		}
 	}
 }
+
+func TestForkBuildOnUpstreamsReleaseIsUpToDate(t *testing.T) {
+	// The badge this prevents: a fork built from upstream's current release
+	// otherwise reports an update forever, because its version string never
+	// equals the tag.
+	if NeedsUpdate("0.20.0+nirvana.3286ad6", "v0.20.0") {
+		t.Fatal("a fork of the current release must not report an update")
+	}
+}
+
+func TestForkStillSeesARealUpstreamRelease(t *testing.T) {
+	if !NeedsUpdate("0.20.0+nirvana.3286ad6", "v0.21.0") {
+		t.Fatal("a genuinely newer upstream release must still be reported")
+	}
+}
+
+func TestBaseVersionStripsPrefixAndMetadata(t *testing.T) {
+	for in, want := range map[string]string{
+		"v0.20.0":                 "0.20.0",
+		"0.20.0":                  "0.20.0",
+		"0.20.0+nirvana.abc1234":  "0.20.0",
+		"v0.20.0+nirvana.abc1234": "0.20.0",
+		"dev":                     "dev",
+	} {
+		if got := BaseVersion(in); got != want {
+			t.Errorf("BaseVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestIsForkOnlyForBuildMetadata(t *testing.T) {
+	if !IsFork("0.20.0+nirvana.abc1234") {
+		t.Error("build metadata marks a fork")
+	}
+	if IsFork("0.20.0") || IsFork("dev") {
+		t.Error("a plain version is not a fork")
+	}
+}
+
+func TestDevBuildsNeverNag(t *testing.T) {
+	if NeedsUpdate("dev", "v0.21.0") {
+		t.Fatal("dev builds must not report updates")
+	}
+}

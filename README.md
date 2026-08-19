@@ -96,6 +96,25 @@ claumon reads credentials from `~/.claude/.credentials.json` (created by `claude
 | `--port` | Override the dashboard port (default from config) |
 | `--db` | Override the DB path (e.g. a copy, to run a test instance) |
 
+## Building this fork
+
+```bash
+./build.sh                 # -> ./claumon
+./build.sh ~/.local/bin/claumon
+```
+
+The script stamps the version as `<upstream release>+nirvana.<sha>`, e.g.
+`0.20.0+nirvana.5dd001e`. That is not cosmetic: the dashboard's update check
+compares the running version against upstream's latest release tag, and a bare
+fork string never matches, leaving a permanent "update available" badge that
+cannot be cleared. Semver build metadata sits outside version precedence, so a
+fork of the current release reads as current while a genuine upstream release
+still registers.
+
+`claumon update` refuses to run on a fork build — self-updating would replace
+this binary with upstream's and silently discard everything below. Merge in the
+checkout instead.
+
 ## Fork additions
 
 This fork adds four things upstream does not have. All four are off by default and
