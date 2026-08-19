@@ -475,7 +475,14 @@ tr.clickable { cursor: pointer; }
 .fl-row.sel .fl-bar.live {
   box-shadow:0 0 6px 1px color-mix(in srgb, var(--green) 55%, transparent);
 }
-.fl-row.sel .fl-mark { border-width:1.5px; }
+/* A selected row's bar goes to full opacity, so its stops go with it —
+   otherwise the line brightens and the stops stay faint on it. */
+.fl-row.sel .fl-mark { border-color:var(--fl-line, var(--accent)); }
+.fl-row.sel .fl-mark.end { background:var(--fl-line, var(--accent)); }
+/* Same in heat view, where segments are drawn opaque because the colour is
+   the reading. */
+.fl-row.heat .fl-mark { border-color:var(--fl-line, var(--accent)); }
+.fl-row.heat .fl-mark.end { background:var(--fl-line, var(--accent)); }
 
 /* A split thread: the replayed history is faint, and an elbow drops out of the
    parent's row at the moment the two diverged. */
@@ -519,13 +526,19 @@ tr.clickable { cursor: pointer; }
   width:18px; height:18px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   background:var(--bg-surface);
-  border:2.5px solid var(--fl-line, var(--accent));
+  /* Matched to the bar's own opacity. A ring drawn at full strength on a bar
+     drawn at .45 reads as a brighter element sitting on the line rather than
+     as a stop belonging to it — the stops glowed and the line receded, which
+     is backwards. The opacity rides on the border colour rather than the
+     element, so the disc's fill stays solid and the line still reads as
+     passing behind it. */
+  border:2.5px solid color-mix(in srgb, var(--fl-line, var(--accent)) 45%, transparent);
   box-sizing:border-box; cursor:pointer; z-index:4;
 }
 .fl-mark:hover {
   background:var(--bg-hover);
-  /* A halo in the line's colour, so hover reads as the stop lighting up
-     rather than as a border change. */
+  /* Hover is the one time a stop should outshine its line. */
+  border-color:var(--fl-line, var(--accent));
   box-shadow:0 0 0 3px color-mix(in srgb, var(--fl-line, var(--accent)) 30%, transparent);
 }
 .fl-markic { width:9px; height:9px; display:block; color:var(--text-dim); }
@@ -533,6 +546,10 @@ tr.clickable { cursor: pointer; }
 /* A terminus is drawn solid — a filled stop is how a transit map says the
    line ends here rather than continuing off the edge. */
 .fl-mark.end {
+  background:color-mix(in srgb, var(--fl-line, var(--accent)) 45%, var(--bg-surface));
+  border-color:color-mix(in srgb, var(--fl-line, var(--accent)) 45%, transparent);
+}
+.fl-mark.end:hover {
   background:var(--fl-line, var(--accent));
 }
 .fl-mark.end .fl-markic { color:var(--bg-surface); }
