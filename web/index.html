@@ -481,7 +481,9 @@ tr.clickable { cursor: pointer; }
    parent's row at the moment the two diverged. */
 /* The join is drawn at the bars' own thickness, and overflows its row upward
    into the parent's, so the two rows must not clip it. */
-.fl-fork-curve { position:absolute; overflow:visible; pointer-events:none; z-index:1; opacity:.9; }
+/* Under the bars: the join should disappear beneath the line it diverges from
+   and the one it merges into, not overlap them. */
+.fl-fork-curve { position:absolute; overflow:visible; pointer-events:none; z-index:0; }
 .fl-row { overflow:visible; }
 
 /* Heat view */
@@ -509,7 +511,7 @@ tr.clickable { cursor: pointer; }
    reads against the span behind it and stays legible where bars overlap.
    Centred on the row rather than the bar's top edge. */
 .fl-mark {
-  position:absolute; top:4px; transform:translateX(-50%);
+  position:absolute; top:4px; transform:translateX(-50%); z-index:3;
   width:16px; height:16px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   background:var(--bg-surface); border:1px solid currentColor;
@@ -585,7 +587,7 @@ tr.clickable { cursor: pointer; }
    sitting on it are what the eye lands on. */
 .fl-bar {
   position:absolute; top:10px; height:5px; border-radius:3px; cursor:pointer;
-  background:var(--accent); opacity:.45; min-width:3px;
+  background:var(--accent); opacity:.45; min-width:3px; z-index:1;
 }
 .fl-bar:hover { opacity:.8; }
 .fl-bar.agent { background:var(--purple); top:11px; height:3px; }
@@ -3973,6 +3975,11 @@ function flForkCurve(child, childBarX) {
   const parent = flData.sessions.find(x => x.session_id === (child.forked_from || {}).session_id);
   // The parent's own colour, so the line that bends is visibly the same line.
   const stroke = parent && parent.is_running ? 'var(--green)' : 'var(--accent)';
+  // ...and the parent's own opacity. Drawing the join at full strength beside a
+  // 45%-opacity bar made the curve read as a different, darker element joined to
+  // the bar rather than as the bar continuing.
+  const lit = flHeat || (parent && parent.session_id === tlSelected) || child.session_id === tlSelected;
+  const alpha = lit ? 1 : 0.45;
   const centre = FL_BAR_H / 2;
   const h = FL_ROW_H + FL_BAR_H;
   const left = Math.max(0, childBarX - FL_CURVE_W);
@@ -3983,7 +3990,8 @@ function flForkCurve(child, childBarX) {
   const path = `M0,${centre} C${w * 0.55},${centre} ${w * 0.45},${FL_ROW_H + centre} ${w},${FL_ROW_H + centre}`;
   return `<svg class="fl-fork-curve" style="left:${left}px;width:${w}px;height:${h}px;top:${-(FL_ROW_H - FL_BAR_TOP)}px"
                viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-            <path d="${path}" fill="none" stroke="${stroke}" stroke-width="${FL_BAR_H}" stroke-linecap="butt"/>
+            <path d="${path}" fill="none" stroke="${stroke}" stroke-opacity="${alpha}"
+                  stroke-width="${FL_BAR_H}" stroke-linecap="butt"/>
           </svg>`;
 }
 
@@ -4277,7 +4285,7 @@ function flRender() {
         ${forkIcon}<span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
       </div>
       <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
-        ${bars}${link}
+        ${link}${bars}
         ${marks}
       </div>
     </div>`);

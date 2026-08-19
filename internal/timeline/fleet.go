@@ -183,6 +183,7 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 			StartedAt:  start,
 			EndedAt:    end,
 			CostUSD:    s.EstimatedCostUSD,
+			Tokens:     s.InputTokens + s.OutputTokens + s.CacheReadTokens + s.CacheCreateTokens,
 			Messages:   s.MessageCount,
 			IsRunning:  s.IsRunning,
 			ForkedFrom: forked,
