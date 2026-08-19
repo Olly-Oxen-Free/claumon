@@ -656,23 +656,26 @@ tr.clickable { cursor: pointer; }
    wide one show thirty ticks; neither read as "the same line, idling". The
    dash is always half the period, so the texture is identical at every width
    and only its scale changes. */
+.fl-bar.live { background:var(--green); }
+/* Declared after .live deliberately, and matched on .idle alone so a live
+   session's cold stretch still dashes. The two rules have equal specificity,
+   so .live sitting below this one silently repainted every cold stretch solid
+   green — a running process with a cold context looked like continuous work,
+   which is exactly the case the dashes exist to show. The colour comes from
+   --fl-line, which is already green on those rows, so nothing is lost. */
 .fl-bar.idle {
   background:repeating-linear-gradient(90deg,
     var(--fl-line, var(--accent)) 0 calc(var(--fl-dash) * .5),
     transparent calc(var(--fl-dash) * .5) var(--fl-dash));
   border-radius:0;
 }
-/* In heat view the segment's own background is the reading, so the dashes are
-   cut out of it with a mask instead of painted over it. */
-.fl-row.heat .fl-bar.idle {
-  -webkit-mask:repeating-linear-gradient(90deg,
-    #000 0 calc(var(--fl-dash) * .5),
-    transparent calc(var(--fl-dash) * .5) var(--fl-dash));
-  mask:repeating-linear-gradient(90deg,
-    #000 0 calc(var(--fl-dash) * .5),
-    transparent calc(var(--fl-dash) * .5) var(--fl-dash));
-}
-.fl-bar.live { background:var(--green); }
+/* Heat does not apply to a cold stretch: heat is token burn, and a cold
+   stretch is by definition the time when none was happening. Colouring it read
+   as demand that never occurred — worse, the gradient interpolates between the
+   buckets either side, so the hotter the work around a lull, the hotter the
+   lull looked. Cold stretches stay dashes in the line's own colour in every
+   view. */
+
 
 /* The ruler is its own row so labels are not repeated per lane. */
 .fl-ruler { display:flex; align-items:center; height:18px; border-bottom:1px solid var(--border); }
@@ -4607,9 +4610,15 @@ function flRender() {
         const b = Math.min(toMs, new Date(sp.to).getTime());
         if (b < a) continue;
         const [px, pw] = clampBar(a, b);
-        const cls = sp.kind === 'idle' ? ' idle' : '';
-        let style = `left:${px}px;width:${pw}px${extraStyle}`;
-        if (sp.kind === 'idle') style += `;--fl-dash:${flDashPeriod(pw)}px`;
+        const idle = sp.kind === 'idle';
+        const cls = idle ? ' idle' : '';
+        // The heat gradient is token burn, so it goes on the stretches where
+        // tokens were actually spent. A cold stretch is the time when none
+        // were, and painting it warm claimed demand that never happened — the
+        // gradient interpolates across it, so the busier the work on either
+        // side, the hotter the lull looked.
+        let style = `left:${px}px;width:${pw}px${idle ? '' : extraStyle}`;
+        if (idle) style += `;--fl-dash:${flDashPeriod(pw)}px`;
         out += `<div class="fl-bar session${s.is_running ? ' live' : ''}${cls}"
                      style="${style}"
                      data-session="${escHtml(s.session_id)}"
@@ -4757,7 +4766,14 @@ function flBindControls(host) {
     flHeat = !flHeat;
     const scroller = host.querySelector('.fl-scroll');
     if (scroller) flPendingScrollLeft = scroller.scrollLeft;
-    flRender();
+    // Turning heat on needs data the current payload does not have: the burn
+    // series is only fetched when burn=1, and that flag is set by flLoad. This
+    // used to call flRender, which redrew from whatever was already in hand —
+    // so the bars stayed uncoloured until some unrelated SSE event happened to
+    // trigger a reload, seconds later. Fetch it now instead.
+    //
+    // Turning heat off needs nothing new, so it just redraws.
+    if (flHeat) flLoad(); else flRender();
   });
 
   const clear = host.querySelector('.fl-btn[data-clear]');
