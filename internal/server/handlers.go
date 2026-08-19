@@ -12,6 +12,7 @@ import (
 	"github.com/fabioconcina/claumon/internal/anomaly"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/limits"
 	"github.com/fabioconcina/claumon/internal/live"
 	"github.com/fabioconcina/claumon/internal/memory"
 	"github.com/fabioconcina/claumon/internal/parser"
@@ -43,6 +44,9 @@ type Handlers struct {
 	// Anomalies reports recent burn-rate spikes and tool loops. Nil when
 	// detection is off.
 	Anomalies func() []anomaly.Finding
+	// Limits reports the rate-limit windows as last read, including scoped
+	// ones the gauges do not show. Nil when limit watching is off.
+	Limits func() []limits.Snapshot
 
 	ReleasesURL     string
 	updateMu        sync.RWMutex
@@ -616,4 +620,16 @@ func (h *Handlers) HandleAgentTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, tl)
+}
+
+// HandleLimits lists every rate-limit window as last read, including the
+// scoped per-model limits the gauges do not surface.
+func (h *Handlers) HandleLimits(w http.ResponseWriter, r *http.Request) {
+	snaps := []limits.Snapshot{}
+	if h.Limits != nil {
+		if got := h.Limits(); got != nil {
+			snaps = got
+		}
+	}
+	writeJSON(w, map[string]any{"limits": snaps, "count": len(snaps)})
 }

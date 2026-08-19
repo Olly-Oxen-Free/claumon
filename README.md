@@ -175,6 +175,73 @@ Two detectors, for the two ways an agent session goes wrong quietly:
 
 Findings are logged and served at `GET /api/anomalies`.
 
+### Limit reset and schedule alerts
+
+Tells you when a usage window **resets**, and — more importantly — when its schedule
+**moves under you**. A window can reset early or late, be rescheduled by Anthropic, or
+a new scoped limit can appear and an old one vanish. Each of those changes what your
+budget actually is, and nothing else in claumon notices.
+
+This is a different question from "how much have I used" (the gauges) and "where is
+this heading" (the forecast). It is the one thing the separate `nirvana-claude-watch`
+daemon existed to answer, and its detection rules are ported here deliberately,
+including the awkward ones:
+
+- A first poll after a cold start is silent — with no prior reading, every limit would
+  look newly appeared.
+- A `resets_at` move under a minute is server jitter, not a reschedule.
+- A threshold crossing fires once for the highest band cleared, not once per band.
+- State persists across restarts, so a reset that happened while claumon was down is
+  still reported rather than swallowed as a fresh baseline.
+
+Resets are announced twice over, by two paths that dedupe against each other: the poll
+notices a window that has rolled over, and a 15-second ticker notices the moment a
+known reset time passes. The ticker exists because a two-minute poll would report a
+reset up to two minutes late, and the whole point is that the budget is available *now*.
+
+```jsonc
+{
+  "limits_enabled": true,
+  "limit_thresholds": [80, 95],
+  "notify": {
+    "enabled": true,
+    "default": { "desktop": true, "email": false },
+    "events": {
+      "reset_reached":    { "desktop": true, "email": true },
+      "schedule_changed": { "desktop": true, "email": true },
+      "limit_appeared":   { "desktop": true, "email": true },
+      "limit_vanished":   { "desktop": true, "email": true },
+      "approaching":      { "desktop": true, "email": false }
+    },
+    "email": {
+      "to": "you@example.com",
+      "from": "you@example.com",
+      "smtp_host": "127.0.0.1",
+      "smtp_port": 1025,
+      "smtp_user": "you@example.com",
+      "password_command": "secret-tool lookup service proton-bridge user you@example.com"
+    }
+  }
+}
+```
+
+Email goes through STARTTLS and takes its password from a shell command rather than
+the config file, so the secret can live in a keyring. Certificate verification is
+disabled on purpose: the intended target is a local Proton Bridge presenting a
+self-signed certificate on loopback, and the connection never leaves the machine.
+Three attempts with a widening delay, then the failure is reported on the desktop —
+a dropped email is never a silent loss.
+
+Prove delivery without waiting for a real reset:
+
+```bash
+claumon notify                  # reset_reached routing
+claumon notify approaching      # or any other event kind
+```
+
+Current windows, including the scoped per-model limits the gauges do not show, are at
+`GET /api/limits`.
+
 ### Session timeline
 
 A **Timeline** tab showing what a session actually did: prompts, replies, tool calls

@@ -23,7 +23,9 @@ import (
 	"github.com/fabioconcina/claumon/internal/api"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/limits"
 	"github.com/fabioconcina/claumon/internal/memory"
+	"github.com/fabioconcina/claumon/internal/notify"
 	"github.com/fabioconcina/claumon/internal/otel"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/pricing"
@@ -57,6 +59,13 @@ type Config struct {
 	Anomaly anomaly.Config `json:"anomaly"`
 	// OTel pushes metrics to an OpenTelemetry collector. Off by default.
 	OTel otel.Config `json:"otel"`
+
+	// LimitsEnabled turns on reset and schedule-change watching.
+	LimitsEnabled bool `json:"limits_enabled"`
+	// LimitThresholds are the usage bands that raise an Approaching event.
+	LimitThresholds []int `json:"limit_thresholds"`
+	// Notify routes limit events to the desktop and email.
+	Notify notify.Config `json:"notify"`
 }
 
 func defaultConfig() Config {
@@ -69,6 +78,8 @@ func defaultConfig() Config {
 		DBPath:           filepath.Join(home, ".claumon", "usage.db"),
 		RetentionDays:    90,
 		Alerts:           alert.DefaultConfig(),
+		LimitThresholds:  []int{80, 95},
+		Notify:           notify.DefaultConfig(),
 		Anomaly:          anomaly.DefaultConfig(),
 		OTel:             otel.DefaultConfig(),
 	}
@@ -116,6 +127,15 @@ func loadConfig() Config {
 	if cfg.OTel.IntervalSecs == 0 {
 		cfg.OTel.IntervalSecs = defaults.OTel.IntervalSecs
 	}
+	if len(cfg.LimitThresholds) == 0 {
+		cfg.LimitThresholds = defaults.LimitThresholds
+	}
+	if cfg.Notify.Email.SMTPHost == "" {
+		cfg.Notify.Email.SMTPHost = defaults.Notify.Email.SMTPHost
+	}
+	if cfg.Notify.Email.SMTPPort == 0 {
+		cfg.Notify.Email.SMTPPort = defaults.Notify.Email.SMTPPort
+	}
 	return cfg
 }
 
@@ -140,6 +160,9 @@ func main() {
 			return
 		case "bench":
 			runBench()
+			return
+		case "notify":
+			runNotifyTest()
 			return
 		}
 	}
@@ -199,6 +222,10 @@ func main() {
 	srv.Handlers.LiveSessions = obs.LiveSessions
 	srv.Handlers.Anomalies = obs.Findings
 
+	// Limit-window watcher: reset and schedule-change alerts, desktop + email.
+	lw := newLimitWatch(cfg)
+	srv.Handlers.Limits = func() []limits.Snapshot { return lw.Snapshot() }
+
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -206,10 +233,13 @@ func main() {
 	// Start SSE broker
 	go srv.Broker.Run(ctx)
 
+	// Announce a reset the moment it lands rather than at the next poll.
+	go lw.watchResets(ctx)
+
 	// Start usage poller (provider handles credential reload on expiry)
 	if provider.HasToken() {
 		apiClient := api.NewClient(provider)
-		go pollUsage(ctx, apiClient, provider, st, srv.Broker, srv.Handlers, fcSvc, obs, time.Duration(cfg.PollIntervalSecs)*time.Second)
+		go pollUsage(ctx, apiClient, provider, st, srv.Broker, srv.Handlers, fcSvc, obs, lw, time.Duration(cfg.PollIntervalSecs)*time.Second)
 	}
 
 	// Start file watcher
@@ -377,7 +407,7 @@ func checkUpdates(ctx context.Context, current string, handlers *server.Handlers
 	}
 }
 
-func pollUsage(ctx context.Context, client *api.Client, provider *auth.Provider, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, obs *observability, interval time.Duration) {
+func pollUsage(ctx context.Context, client *api.Client, provider *auth.Provider, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, obs *observability, lw *limitWatch, interval time.Duration) {
 	// Resume the poll cadence across restarts rather than always polling a few
 	// seconds after start. The poller's backoff is in-memory only, so without
 	// this a burst of restarts each fires an immediate poll and trips the usage
@@ -403,6 +433,7 @@ func pollUsage(ctx context.Context, client *api.Client, provider *auth.Provider,
 	p := &poller{
 		client: client, provider: provider, st: st, broker: broker, handlers: handlers, forecast: fcSvc,
 		obs:      obs,
+		limits:   lw,
 		interval: interval, backoff: interval, lastAuthOK: true,
 	}
 
@@ -425,6 +456,7 @@ type poller struct {
 	handlers    *server.Handlers
 	forecast    *forecast.Service
 	obs         *observability
+	limits      *limitWatch
 	interval    time.Duration
 	backoff     time.Duration
 	lastAuthOK  bool
@@ -462,7 +494,7 @@ func (p *poller) fetch(ctx context.Context) {
 		p.authWaiting = false
 	}
 
-	err := fetchAndBroadcastUsage(ctx, p.client, p.st, p.broker, p.handlers, p.forecast, p.obs)
+	err := fetchAndBroadcastUsage(ctx, p.client, p.st, p.broker, p.handlers, p.forecast, p.obs, p.limits)
 	p.lastAuthOK = broadcastAuthStatus(p.provider, p.broker, p.lastAuthOK)
 	if err == nil {
 		p.backoff = p.interval
@@ -513,7 +545,7 @@ func retryBackoff(err error, defaultBackoff time.Duration) time.Duration {
 	return defaultBackoff
 }
 
-func fetchAndBroadcastUsage(ctx context.Context, client *api.Client, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, obs *observability) error {
+func fetchAndBroadcastUsage(ctx context.Context, client *api.Client, st *store.Store, broker *server.SSEBroker, handlers *server.Handlers, fcSvc *forecast.Service, obs *observability, lw *limitWatch) error {
 	usage, err := client.FetchUsage(ctx)
 	if err != nil {
 		log.Printf("[poll] Usage fetch error: %v", err)
@@ -533,6 +565,9 @@ func fetchAndBroadcastUsage(ctx context.Context, client *api.Client, st *store.S
 	log.Printf("[poll] Usage: session=%.1f%% weekly=%.1f%%", usage.SessionPercent, usage.WeeklyPercent)
 	if obs != nil {
 		obs.onUsage(ctx, evt, time.Now())
+	}
+	if lw != nil {
+		lw.observe(usage.Raw, time.Now().UTC())
 	}
 	return nil
 }
