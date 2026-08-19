@@ -261,6 +261,28 @@ claumon notify approaching      # or any other event kind
 Current windows, including the scoped per-model limits the gauges do not show, are at
 `GET /api/limits`.
 
+### herdr integration
+
+[herdr](https://github.com/herdrdev/herdr) is the terminal workspace manager these
+sessions run in, and it knows things claumon cannot work out alone: which pane a
+session occupies, what the user named that task, and whether the agent is working or
+idle right now. It keys all of it by the same session id, so the two join cleanly.
+
+The join makes a row actionable rather than merely informative. A session stops being
+"something in Documents/Work" and becomes "the pane in workspace 3 titled *Audit AI
+tool usage*, still working" — and the pane badge on the row puts it in front of you.
+
+herdr's live status also overrides claumon's own guess: claumon infers "running" from
+process state and file mtimes, while herdr watches the process directly.
+
+Only **focus** is exposed. herdr can also submit prompts and keystrokes to another
+agent; a dashboard must not, because that spends someone else's context on a decision
+they did not make.
+
+Everything degrades to nothing when herdr is absent — it is an enrichment, not a
+dependency. `GET /api/herdr/agents` reports what it sees;
+`POST /api/herdr/focus/{pane}` brings a pane forward.
+
 ### Session timeline
 
 A **Timeline** tab showing what a session actually did: prompts, replies, tool calls

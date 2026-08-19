@@ -12,6 +12,7 @@ import (
 	"github.com/fabioconcina/claumon/internal/anomaly"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/herdr"
 	"github.com/fabioconcina/claumon/internal/limits"
 	"github.com/fabioconcina/claumon/internal/live"
 	"github.com/fabioconcina/claumon/internal/memory"
@@ -680,4 +681,34 @@ func (h *Handlers) HandleFleet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, fleet)
+}
+
+// HandleHerdrFocus brings a session's terminal pane to the front.
+//
+// Only focus is exposed. herdr can also submit prompts and keystrokes to
+// another agent; a dashboard must not, because that spends someone else's
+// context on a decision they did not make.
+func (h *Handlers) HandleHerdrFocus(w http.ResponseWriter, r *http.Request) {
+	pane := r.PathValue("pane")
+	if !herdr.ValidPaneID(pane) {
+		writeJSONError(w, "invalid pane id", http.StatusBadRequest)
+		return
+	}
+	if err := (herdr.Client{}).Focus(pane); err != nil {
+		writeJSONError(w, "focus failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"focused": pane})
+}
+
+// HandleHerdrAgents lists what the workspace manager is running, so the
+// dashboard can show panes claumon has no transcript for yet.
+func (h *Handlers) HandleHerdrAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := (herdr.Client{}).List()
+	if err != nil {
+		// Not an error condition: herdr simply is not running here.
+		writeJSON(w, map[string]any{"available": false, "agents": []herdr.Agent{}})
+		return
+	}
+	writeJSON(w, map[string]any{"available": true, "agents": agents})
 }

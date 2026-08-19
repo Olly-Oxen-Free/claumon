@@ -54,7 +54,14 @@ type Event struct {
 	Title string `json:"title"`
 	// Detail is a one-line summary: the tool's key argument, the subagent's
 	// task, or the start of the message text.
-	Detail  string `json:"detail,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// Full is the untruncated text behind Detail, sent so a row can be opened
+	// without a second request. Capped, because a tool call can carry a whole
+	// file and the list holds hundreds of rows.
+	Full string `json:"full,omitempty"`
+	// Output is the tool's result, capped the same way. Empty for anything
+	// that is not a completed tool call.
+	Output  string `json:"output,omitempty"`
 	IsError bool   `json:"is_error,omitempty"`
 
 	Model       string  `json:"model,omitempty"`
@@ -272,6 +279,7 @@ func buildFromFile(path, sessionID string) (*Timeline, error) {
 					At:     l.Timestamp,
 					Title:  "You",
 					Detail: summarize(text),
+					Full:   clip(text),
 				})
 			}
 		case "assistant":
@@ -315,18 +323,20 @@ func appendAssistant(tl *Timeline, pending map[string]int, l *line, blocks []con
 	charged := false
 
 	if t := strings.TrimSpace(text.String()); t != "" {
-		ev := Event{Kind: KindMessage, At: l.Timestamp, Title: "Claude", Detail: summarize(t)}
+		ev := Event{Kind: KindMessage, At: l.Timestamp, Title: "Claude", Detail: summarize(t), Full: clip(t)}
 		applyUsage(&ev, usage)
 		charged = true
 		tl.Events = append(tl.Events, ev)
 	}
 
 	for _, b := range tools {
+		detail, full := toolDetail(b.Name, b.Input)
 		ev := Event{
 			Kind:   KindTool,
 			At:     l.Timestamp,
 			Title:  b.Name,
-			Detail: toolDetail(b.Name, b.Input),
+			Detail: detail,
+			Full:   full,
 		}
 		if !charged {
 			applyUsage(&ev, usage)
@@ -366,6 +376,7 @@ func closeResults(tl *Timeline, pending map[string]int, blocks []contentBlock, a
 			ev.DurationMS = at.Sub(ev.At).Milliseconds()
 		}
 		ev.IsError = b.IsError
+		ev.Output = clip(resultText(b.Content))
 	}
 }
 
@@ -586,6 +597,29 @@ func decodeContent(raw json.RawMessage) []contentBlock {
 	return nil
 }
 
+// resultText flattens a tool_result payload, which is either a plain string or
+// an array of content blocks depending on the tool.
+func resultText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.TrimSpace(text)
+	}
+	var blocks []contentBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, blk := range blocks {
+		if blk.Text != "" {
+			b.WriteString(blk.Text)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func userText(blocks []contentBlock) string {
 	var b strings.Builder
 	for _, blk := range blocks {
@@ -596,14 +630,20 @@ func userText(blocks []contentBlock) string {
 	return strings.TrimSpace(b.String())
 }
 
-// toolDetail picks the argument that says what the call was actually doing.
-func toolDetail(name string, input json.RawMessage) string {
+// Longest text carried per event. A row can be opened to read the whole
+// argument or result, but a transcript can hold a megabyte in one tool call
+// and the list renders hundreds of rows.
+const maxFullChars = 4000
+
+// toolDetail picks the argument that says what the call was actually doing,
+// returning both the one-line summary and the untruncated text.
+func toolDetail(name string, input json.RawMessage) (summary, full string) {
 	if len(input) == 0 {
-		return ""
+		return "", ""
 	}
 	var m map[string]any
 	if err := json.Unmarshal(input, &m); err != nil {
-		return ""
+		return "", ""
 	}
 	// Ordered by how much each says about the call, most specific first.
 	for _, key := range []string{
@@ -611,10 +651,22 @@ func toolDetail(name string, input json.RawMessage) string {
 		"description", "prompt", "notebook_path", "skill",
 	} {
 		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
-			return summarize(v)
+			return summarize(v), clip(strings.TrimSpace(v))
 		}
 	}
-	return ""
+	return "", ""
+}
+
+// clip bounds a string on a rune boundary.
+func clip(s string) string {
+	if len(s) <= maxFullChars {
+		return s
+	}
+	cut := maxFullChars
+	for cut > 0 && !isBoundary(s, cut) {
+		cut--
+	}
+	return s[:cut] + "\n…(truncated)"
 }
 
 // summarize collapses text to one short line. Timelines are scanned, not read.

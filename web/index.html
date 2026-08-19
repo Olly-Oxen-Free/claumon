@@ -447,6 +447,27 @@ tr.clickable { cursor: pointer; }
 .ic-err   { color:var(--red); }
 .ic-mcp   { color:var(--teal); }
 
+/* Lane markers: key moments drawn on the bar itself. */
+.fl-mark {
+  position:absolute; top:3px; transform:translateX(-50%);
+  line-height:0; pointer-events:auto; cursor:default; z-index:1;
+}
+.fl-mark.agent { cursor:pointer; }
+.fl-markic { width:11px; height:11px; }
+.fl-markic use { fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.fl-mark.start { color:var(--yellow); }
+.fl-mark.end   { color:var(--text-dim); }
+.fl-mark.agent { color:var(--purple); }
+.fl-mark.agent:hover .fl-markic { stroke-width:2.2; }
+
+.fl-pane {
+  background:none; border:1px solid var(--border); border-radius:4px;
+  color:var(--teal); font-family:ui-monospace,monospace; font-size:9.5px;
+  padding:0 4px; cursor:pointer; line-height:14px;
+}
+.fl-pane:hover { border-color:var(--teal); color:var(--text-bright); }
+.fl-pane.failed { border-color:var(--red); color:var(--red); }
+
 /* Fleet gantt */
 .fl-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
 .fl-windows, .fl-pan { display:flex; gap:4px; }
@@ -525,6 +546,26 @@ tr.clickable { cursor: pointer; }
 .tl-paused { font-size:11px; color:var(--yellow); display:none; margin-left:auto; }
 .tl-paused.on { display:inline; }
 .tl-list { max-height:520px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; }
+
+/* Event list: indent shows who is speaking versus what they did. */
+.tl-row.d0 { padding-left:8px; }
+.tl-row.d1 { padding-left:30px; }
+.tl-row.d1 .tl-title { font-weight:500; }
+.tl-row.expandable { cursor:pointer; }
+.tl-row.expandable:hover { background:var(--bg-hover); }
+.tl-row.open { background:var(--bg-hover); }
+.tl-body { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tl-expand { background:var(--bg); border-left:2px solid var(--accent); }
+.tl-expand.d1 { margin-left:30px; }
+.tl-outlabel {
+  font-size:10px; color:var(--text-dim); text-transform:uppercase;
+  letter-spacing:.05em; padding:6px 10px 0;
+}
+.tl-pre {
+  margin:0; padding:8px 10px; font-family:ui-monospace,monospace; font-size:11.5px;
+  white-space:pre-wrap; word-break:break-word; color:var(--text); max-height:340px; overflow:auto;
+}
+.tl-pre.out { color:var(--text-dim); }
 
 /* Timeline tab */
 .tl-controls { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
@@ -1086,6 +1127,7 @@ tr.clickable { cursor: pointer; }
   <g id="ic-msg"><path d="M2 3h12v8H6l-4 3z"/></g>
   <g id="ic-spark"><path d="M8 2l1.6 4.4L14 8l-4.4 1.6L8 14l-1.6-4.4L2 8l4.4-1.6z"/></g>
   <g id="ic-alert"><circle cx="8" cy="8" r="6"/><path d="M8 5v4M8 11h.01"/></g>
+  <g id="ic-flag"><path d="M4 14V2h8l-2 3 2 3H4"/></g>
   <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
 </defs></svg>
 <div class="tabs">
@@ -3532,13 +3574,24 @@ function tlEventRow(e, sessionId) {
     title += ` <span class="tl-detail">${e.agent.tool_calls} tools</span>`;
   }
 
-  return `<div class="${cls.join(' ')}"${attrs}>
+  // Indent level, so the shape of the conversation reads at a glance: what
+  // you said and what Claude said sit at the outer level, and the tool calls
+  // Claude made to answer sit under them.
+  const depth = (e.kind === 'prompt' || e.kind === 'message') ? 0 : 1;
+  cls.push('d' + depth);
+
+  const expandable = !!(e.full || e.output);
+  if (expandable) cls.push('expandable');
+
+  return `<div class="${cls.join(' ')}"${attrs} data-seq="${e.seq}">
     <span class="tl-time">${escHtml(time)}</span>
     <span class="tl-glyph">${evIcon(e)}</span>
-    <span><span class="tl-title">${title}</span> <span class="tl-detail">${escHtml(e.detail || '')}</span></span>
+    <span class="tl-body"><span class="tl-title">${title}</span> <span class="tl-detail">${escHtml(e.detail || '')}</span></span>
     <span class="${durCls}">${escHtml(dur)}</span>
     <span class="tl-cost">${escHtml(fmtCostSmall(e.cost_usd || (e.agent && e.agent.cost_usd) || 0))}</span>
-  </div>` + (e.kind === 'subagent' && e.agent
+  </div>` +
+  (expandable ? `<div class="tl-expand d${depth}" id="tl-exp-${e.seq}" style="display:none"></div>` : '') +
+  (e.kind === 'subagent' && e.agent
     ? `<div class="tl-children" id="tl-agent-${escHtml(e.agent.agent_id)}" style="display:none"></div>`
     : '');
 }
@@ -3602,7 +3655,27 @@ function tlRenderLive(sessionId) {
 // Subagent rows expand in place. Their events are fetched on demand: a session
 // can spawn dozens of agents, and loading every one up front would make the
 // first paint useless.
+// Clicking a row opens the whole argument and, for a tool call, what it
+// returned. The list shows one line so it can be scanned; the full string is
+// carried with the event so opening it costs no request.
 document.getElementById('tl-list').addEventListener('click', ev => {
+  const anyRow = ev.target.closest('.tl-row.expandable');
+  if (anyRow && !anyRow.classList.contains('subagent')) {
+    const box = document.getElementById('tl-exp-' + anyRow.dataset.seq);
+    if (!box) return;
+    if (box.style.display === 'block') { box.style.display = 'none'; anyRow.classList.remove('open'); return; }
+    const e = (tlCurrentTimeline && tlCurrentTimeline.events || [])
+      .find(x => x.seq === Number(anyRow.dataset.seq));
+    if (!e) return;
+    let html = '';
+    if (e.full) html += `<pre class="tl-pre">${escHtml(e.full)}</pre>`;
+    if (e.output) html += `<div class="tl-outlabel">output</div><pre class="tl-pre out">${escHtml(e.output)}</pre>`;
+    box.innerHTML = html || '<div class="tl-empty">Nothing more to show.</div>';
+    box.style.display = 'block';
+    anyRow.classList.add('open');
+    return;
+  }
+
   const row = ev.target.closest('.tl-row.subagent');
   if (!row) return;
   const agentId = row.dataset.agent;
@@ -3702,6 +3775,11 @@ let flExpanded = new Set();  // sessions whose agents are shown
 // its own while you are reading is worse than one that never moves.
 let flScrollToNow = true;
 
+// A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
+function flMark(id) {
+  return `<svg class="fl-markic" viewBox="0 0 16 16"><use href="#${id}"/></svg>`;
+}
+
 function flSpec() {
   return FL_WINDOWS.find(w => w.key === flWindow) || FL_WINDOWS[2];
 }
@@ -3788,15 +3866,35 @@ function flRender() {
 
     const caret = agents.length ? (open ? '▾ ' : '▸ ') : '';
     const label = `${caret}${s.repo || 'unknown'}${agents.length ? ` · ${agents.length}` : ''}`;
-    const meta = new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // The pane badge is the herdr join made useful: it names where the session
+    // is running and clicking it puts that pane in front of you.
+    const meta = s.herdr
+      ? `<button class="fl-pane" data-pane="${escHtml(s.herdr.pane_id)}" title="focus ${escHtml(s.herdr.pane_id)} in herdr">${escHtml(s.herdr.pane_id)}</button>`
+      : escHtml(new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+    // Key moments are marked on the bar itself, so a spawn or a finish is
+    // visible without opening the row. Agents spawning is the one that
+    // matters most: it is where a session's cost and time multiply.
+    let marks = `<span class="fl-mark start" style="left:${x(st)}px" title="session start">${flMark('ic-rocket')}</span>`;
+    for (const a of agents) {
+      const at = new Date(a.started_at).getTime();
+      if (at < from || at > to) continue;
+      marks += `<span class="fl-mark agent" style="left:${x(at)}px"` +
+        ` data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"` +
+        ` title="${escHtml((a.agent_type || 'subagent') + ' spawned')}">${flMark('ic-bot')}</span>`;
+    }
+    if (!s.is_running && en <= to) {
+      marks += `<span class="fl-mark end" style="left:${x(en)}px" title="session end">${flMark('ic-flag')}</span>`;
+    }
 
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}" data-session="${escHtml(s.session_id)}">
       <div class="fl-label" title="${escHtml((s.title || s.cwd || ''))}">
-        <span class="fl-name">${escHtml(label)}</span><span class="fl-when">${escHtml(meta)}</span>
+        <span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
       </div>
       <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
         <div class="fl-bar session${s.is_running ? ' live' : ''}"
              style="left:${bx}px;width:${bw}px" data-session="${escHtml(s.session_id)}"></div>
+        ${marks}
       </div>
     </div>`);
 
@@ -3868,6 +3966,24 @@ function flBindControls(host) {
 
 function flBindRows(host) {
   const tip = document.getElementById('tl-tip');
+
+  // Focus only. herdr can also submit prompts to another agent; a dashboard
+  // must not, because that spends someone else's context on a decision they
+  // did not make.
+  host.querySelectorAll('.fl-pane').forEach(el =>
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
+      fetch('/api/herdr/focus/' + encodeURIComponent(el.dataset.pane), { method: 'POST' })
+        .then(r => { if (!r.ok) throw new Error('focus'); })
+        .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
+    }));
+
+  // A spawn marker opens that agent, same as clicking its bar.
+  host.querySelectorAll('.fl-mark.agent').forEach(el =>
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
+      flOpenAgent(el.dataset.session, el.dataset.agent);
+    }));
 
   host.querySelectorAll('.fl-label').forEach(el => {
     const row = el.closest('.fl-row');
@@ -3944,6 +4060,10 @@ function flTipHtml(s, agent) {
   rows.push(['repo', s.repo || '—']);
   if (s.cwd) rows.push(['tree', s.cwd]);
   if (s.git_branch) rows.push(['branch', s.git_branch]);
+  if (s.herdr) {
+    rows.push(['pane', s.herdr.pane_id + (s.herdr.workspace_id ? ' · ' + s.herdr.workspace_id : '')]);
+    if (s.herdr.status) rows.push(['herdr', s.herdr.status + (s.herdr.focused ? ' · focused' : '')]);
+  }
   rows.push(['agent', agent ? (agent.agent_type || 'subagent') : 'session']);
   if (!agent && s.model) rows.push(['model', shortModel(s.model)]);
   rows.push(['started', start.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })]);

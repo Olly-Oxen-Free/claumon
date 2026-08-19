@@ -505,3 +505,77 @@ func TestAgentRefCarriesItsModelAndSpan(t *testing.T) {
 		t.Fatalf("agent span not set: %v..%v", ref.StartedAt, ref.EndedAt)
 	}
 }
+
+func TestFullTextIsCarriedAlongsideTheSummary(t *testing.T) {
+	long := "line one is quite long indeed and keeps going for a while past the summary cut\nline two\nline three"
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{toolUse("t1", "Bash", map[string]any{"command": long})}, nil),
+	})
+	tl, _ := Build(dir, id)
+	ev := tl.Events[0]
+	if ev.Detail == ev.Full {
+		t.Fatal("the summary should be shorter than the full text")
+	}
+	if !contains(ev.Full, "line three") {
+		t.Fatalf("full text truncated too early: %q", ev.Full)
+	}
+	if contains(ev.Detail, "line two") {
+		t.Fatalf("summary should stop at the first line: %q", ev.Detail)
+	}
+}
+
+func TestToolOutputIsCapturedFromTheResult(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{toolUse("t1", "Bash", map[string]any{"command": "ls"})}, nil),
+		{"type": "user", "timestamp": at(2), "message": map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": "file-a\nfile-b"},
+		}}},
+	})
+	tl, _ := Build(dir, id)
+	if tl.Events[0].Output != "file-a\nfile-b" {
+		t.Fatalf("output = %q, want the result text", tl.Events[0].Output)
+	}
+}
+
+func TestToolOutputHandlesBlockShapedResults(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{toolUse("t1", "Read", map[string]any{"file_path": "/a"})}, nil),
+		{"type": "user", "timestamp": at(2), "message": map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": []any{
+				map[string]any{"type": "text", "text": "contents here"},
+			}},
+		}}},
+	})
+	tl, _ := Build(dir, id)
+	if tl.Events[0].Output != "contents here" {
+		t.Fatalf("output = %q", tl.Events[0].Output)
+	}
+}
+
+func TestCarriedTextIsCappedOnARuneBoundary(t *testing.T) {
+	huge := ""
+	for len(huge) < maxFullChars*2 {
+		huge += "café ✳ "
+	}
+	got := clip(huge)
+	if len(got) > maxFullChars+32 {
+		t.Fatalf("clip returned %d bytes, want ~%d", len(got), maxFullChars)
+	}
+	if !contains(got, "truncated") {
+		t.Fatal("a clipped string should say so")
+	}
+	for _, r := range got {
+		if r == 0xFFFD {
+			t.Fatal("clip split a multi-byte character")
+		}
+	}
+}
+
+func contains(hay, needle string) bool {
+	for i := 0; i+len(needle) <= len(hay); i++ {
+		if hay[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}

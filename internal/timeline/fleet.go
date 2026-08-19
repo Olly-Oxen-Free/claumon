@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fabioconcina/claumon/internal/herdr"
 	"github.com/fabioconcina/claumon/internal/parser"
 )
 
@@ -50,6 +51,25 @@ type FleetSession struct {
 	IsRunning bool      `json:"is_running"`
 
 	Agents []FleetAgent `json:"agents,omitempty"`
+
+	// Herdr is the pane this session is running in, when the workspace
+	// manager knows about it. Absent when herdr is not running.
+	Herdr *HerdrRef `json:"herdr,omitempty"`
+}
+
+// HerdrRef locates a session in the terminal workspace manager, so the
+// dashboard can name the task the way the user named it and put the pane in
+// front of them.
+type HerdrRef struct {
+	PaneID      string `json:"pane_id"`
+	TabID       string `json:"tab_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// Title is the tab's task name.
+	Title string `json:"title,omitempty"`
+	// Status is herdr's live view: working or idle. More reliable than
+	// inferring from file mtimes, because herdr watches the process.
+	Status  string `json:"status,omitempty"`
+	Focused bool   `json:"focused,omitempty"`
 }
 
 // FleetAgent is one subagent, as a span.
@@ -68,6 +88,14 @@ type FleetAgent struct {
 // A window is a time range, but the transcripts on disk are not indexed by
 // time, so the scan is bounded by recency and then filtered.
 func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, error) {
+	// One call, reused for every session: herdr is asked once per request
+	// rather than once per row. Failure is silent by design — the fleet is
+	// complete without it.
+	panes := map[string]herdr.Agent{}
+	if agents, err := (herdr.Client{}).List(); err == nil {
+		panes = herdr.BySession(agents)
+	}
+
 	if scanLimit <= 0 {
 		scanLimit = 500
 	}
@@ -127,6 +155,24 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 		}
 		if path != "" {
 			fs.Agents = agentSpans(sessionDir(path, s.ID))
+		}
+		if h, ok := panes[s.ID]; ok {
+			fs.Herdr = &HerdrRef{
+				PaneID:      h.PaneID,
+				TabID:       h.TabID,
+				WorkspaceID: h.WorkspaceID,
+				Title:       h.Title,
+				Status:      h.Status,
+				Focused:     h.Focused,
+			}
+			// herdr watches the process, so its view of "working" beats an
+			// inference drawn from transcript mtimes.
+			if h.Status == "working" {
+				fs.IsRunning = true
+			}
+			if fs.Title == "" {
+				fs.Title = h.Title
+			}
 		}
 		out.Sessions = append(out.Sessions, fs)
 	}
