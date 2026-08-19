@@ -37,6 +37,7 @@ func New(claudeDir string, st *store.Store, webFS fs.FS) *Server {
 	mux.HandleFunc("GET /api/timeline/{id}/agents/{agent}", handlers.HandleAgentTimeline)
 	mux.HandleFunc("GET /api/anomalies", handlers.HandleAnomalies)
 	mux.HandleFunc("GET /api/limits", handlers.HandleLimits)
+	mux.HandleFunc("GET /api/limits/events", handlers.HandleLimitEvents)
 	mux.HandleFunc("GET /api/memories", handlers.HandleMemories)
 	mux.HandleFunc("GET /api/memories/staleness", handlers.HandleMemoriesStaleness)
 	mux.HandleFunc("GET /api/memories/graph", handlers.HandleMemoriesGraph)

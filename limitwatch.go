@@ -35,7 +35,24 @@ type limitWatch struct {
 
 	mu    sync.Mutex
 	state *limits.State
+	// events is a capped log of what has been announced, kept because the
+	// NirvanaOS cockpit page shows a history and the daemon it replaces kept
+	// one. claumon's own state file stays free of presentation concerns.
+	events []loggedEvent
+	// viewPath is where the cockpit-facing view is published.
+	viewPath string
 }
+
+// loggedEvent is one announcement, in the shape the cockpit page reads.
+type loggedEvent struct {
+	At      time.Time `json:"at"`
+	Limit   string    `json:"limit"`
+	Kind    string    `json:"kind"`
+	Message string    `json:"message"`
+}
+
+// How many announcements the cockpit history keeps. Matches the daemon's cap.
+const eventLogCap = 200
 
 // How often the punctual path checks whether a reset time has arrived. Fine
 // enough that an announcement is never noticeably late, coarse enough to cost
@@ -48,6 +65,7 @@ func newLimitWatch(cfg Config) *limitWatch {
 		enabled:    cfg.LimitsEnabled,
 		thresholds: cfg.LimitThresholds,
 		statePath:  statePath,
+		viewPath:   filepath.Join(filepath.Dir(cfg.DBPath), "cockpit-limits.json"),
 		notifier:   notify.New(cfg.Notify),
 		state:      limits.LoadState(statePath),
 	}
@@ -82,6 +100,7 @@ func (w *limitWatch) observe(raw json.RawMessage, now time.Time) {
 	for _, ev := range events {
 		w.announce(ev)
 	}
+	w.publish()
 }
 
 // watchResets announces a reset the moment its time arrives, without waiting
@@ -126,12 +145,92 @@ func (w *limitWatch) fireDueResets(now time.Time) {
 	for _, ev := range due {
 		w.announce(ev)
 	}
+	if len(due) > 0 {
+		w.publish()
+	}
 }
 
 func (w *limitWatch) announce(ev limits.Event) {
 	msg := limits.Render(ev)
 	log.Printf("[limits] %s: %s — %s", ev.Kind, msg.Title, msg.Body)
 	w.notifier.Notify(string(ev.Kind), msg.Title, msg.Body, msg.Urgency)
+
+	w.mu.Lock()
+	w.events = append(w.events, loggedEvent{
+		At:      ev.At,
+		Limit:   ev.Limit,
+		Kind:    string(ev.Kind),
+		Message: msg.Title + " — " + msg.Body,
+	})
+	if len(w.events) > eventLogCap {
+		w.events = w.events[len(w.events)-eventLogCap:]
+	}
+	w.mu.Unlock()
+}
+
+// Events returns the announcement history, newest last.
+func (w *limitWatch) Events() []loggedEvent {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]loggedEvent(nil), w.events...)
+}
+
+// cockpitView is the shape the NirvanaOS cockpit Claude page reads. It mirrors
+// the retired daemon's state file so that page keeps working, without making
+// claumon's own state carry a presentation format.
+type cockpitView struct {
+	LastPoll time.Time      `json:"last_poll,omitzero"`
+	Limits   []cockpitLimit `json:"limits"`
+	Events   []loggedEvent  `json:"events"`
+}
+
+type cockpitLimit struct {
+	Kind     string `json:"kind"`
+	Percent  int64  `json:"percent"`
+	ResetsAt string `json:"resets_at"`
+	Scope    *struct {
+		Model struct {
+			DisplayName string `json:"display_name"`
+		} `json:"model"`
+	} `json:"scope,omitempty"`
+}
+
+// publish writes the cockpit view. Best-effort: a failure here must never stop
+// an alert from going out.
+func (w *limitWatch) publish() {
+	w.mu.Lock()
+	view := cockpitView{LastPoll: w.state.LastPoll, Events: append([]loggedEvent(nil), w.events...)}
+	for _, l := range w.state.Limits {
+		cl := cockpitLimit{
+			Kind:     l.Kind,
+			Percent:  l.Percent,
+			ResetsAt: l.ResetsAt.Format(time.RFC3339),
+		}
+		if l.ScopeModel != "" {
+			cl.Scope = &struct {
+				Model struct {
+					DisplayName string `json:"display_name"`
+				} `json:"model"`
+			}{}
+			cl.Scope.Model.DisplayName = l.ScopeModel
+		}
+		view.Limits = append(view.Limits, cl)
+	}
+	path := w.viewPath
+	w.mu.Unlock()
+
+	data, err := json.MarshalIndent(view, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("[limits] could not write cockpit view: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("[limits] could not publish cockpit view: %v", err)
+	}
 }
 
 // Snapshot returns the last reading, for the API.

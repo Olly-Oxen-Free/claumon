@@ -47,6 +47,8 @@ type Handlers struct {
 	// Limits reports the rate-limit windows as last read, including scoped
 	// ones the gauges do not show. Nil when limit watching is off.
 	Limits func() []limits.Snapshot
+	// LimitEvents reports announced resets and schedule changes, newest last.
+	LimitEvents func() []map[string]any
 
 	ReleasesURL     string
 	updateMu        sync.RWMutex
@@ -632,4 +634,16 @@ func (h *Handlers) HandleLimits(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"limits": snaps, "count": len(snaps)})
+}
+
+// HandleLimitEvents lists the resets and schedule changes claumon has
+// announced, newest last.
+func (h *Handlers) HandleLimitEvents(w http.ResponseWriter, r *http.Request) {
+	events := []map[string]any{}
+	if h.LimitEvents != nil {
+		if got := h.LimitEvents(); got != nil {
+			events = got
+		}
+	}
+	writeJSON(w, map[string]any{"events": events, "count": len(events)})
 }

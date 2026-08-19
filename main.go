@@ -225,6 +225,15 @@ func main() {
 	// Limit-window watcher: reset and schedule-change alerts, desktop + email.
 	lw := newLimitWatch(cfg)
 	srv.Handlers.Limits = func() []limits.Snapshot { return lw.Snapshot() }
+	srv.Handlers.LimitEvents = func() []map[string]any {
+		out := []map[string]any{}
+		for _, e := range lw.Events() {
+			out = append(out, map[string]any{
+				"at": e.At, "limit": e.Limit, "kind": e.Kind, "message": e.Message,
+			})
+		}
+		return out
+	}
 
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
