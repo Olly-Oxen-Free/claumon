@@ -3971,7 +3971,7 @@ const FL_BAR_TOP = 10;
 const FL_BAR_H = 5;
 const FL_CURVE_W = 20;
 
-function flForkCurve(child, childBarX) {
+function flForkCurve(child, childBarX, clampBar) {
   const parent = flData.sessions.find(x => x.session_id === (child.forked_from || {}).session_id);
   // The parent's own colour, so the line that bends is visibly the same line.
   const stroke = parent && parent.is_running ? 'var(--green)' : 'var(--accent)';
@@ -3982,12 +3982,33 @@ function flForkCurve(child, childBarX) {
   const alpha = lit ? 1 : 0.45;
   const centre = FL_BAR_H / 2;
   const h = FL_ROW_H + FL_BAR_H;
-  const left = Math.max(0, childBarX - FL_CURVE_W);
+  const curveStart = childBarX - FL_CURVE_W;
+
+  // Where the parent's own bar ends. A split taken near the end of a session
+  // leaves the parent's bar stopping short of where the curve begins, and the
+  // curve then starts in empty space — the break this closes. The gap is filled
+  // with a straight run at the parent's level, so the parent's line, the lead-in
+  // and the curve are one stroke.
+  let lead = 0;
+  let left = Math.max(0, curveStart);
+  if (parent && typeof clampBar === 'function') {
+    const [px, pw] = clampBar(new Date(parent.started_at).getTime(),
+                              new Date(parent.ended_at).getTime());
+    const parentEndX = px + pw;
+    if (parentEndX < curveStart) {
+      left = Math.max(0, parentEndX - 1); // overlap a pixel so no seam shows
+      lead = curveStart - left;
+    }
+  }
+
   const w = childBarX - left;
   if (w <= 0) return '';
-  // From the parent's bar centre down to the child's, easing out then in so it
-  // leaves and arrives along the bars rather than crossing them at an angle.
-  const path = `M0,${centre} C${w * 0.55},${centre} ${w * 0.45},${FL_ROW_H + centre} ${w},${FL_ROW_H + centre}`;
+  // Straight at the parent's level for the lead-in, then down to the child's,
+  // easing out and in so it leaves and arrives along the bars rather than
+  // crossing them at an angle.
+  const c0 = lead + (w - lead) * 0.55;
+  const c1 = lead + (w - lead) * 0.45;
+  const path = `M0,${centre} L${lead},${centre} C${c0},${centre} ${c1},${FL_ROW_H + centre} ${w},${FL_ROW_H + centre}`;
   return `<svg class="fl-fork-curve" style="left:${left}px;width:${w}px;height:${h}px;top:${-(FL_ROW_H - FL_BAR_TOP)}px"
                viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
             <path d="${path}" fill="none" stroke="${stroke}" stroke-opacity="${alpha}"
@@ -4274,7 +4295,7 @@ function flRender() {
         : `left:${ox}px;width:${ow}px`;
       bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
                    style="${own}" data-session="${escHtml(s.session_id)}"></div>`;
-      link = flForkCurve(s, ox);
+      link = flForkCurve(s, ox, clampBar);
     } else {
       bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
                    style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>`;
