@@ -16,6 +16,7 @@ import (
 	"github.com/fabioconcina/claumon/internal/limits"
 	"github.com/fabioconcina/claumon/internal/live"
 	"github.com/fabioconcina/claumon/internal/memory"
+	"github.com/fabioconcina/claumon/internal/nimbalyst"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
 	"github.com/fabioconcina/claumon/internal/timeline"
@@ -702,6 +703,43 @@ func (h *Handlers) HandleHerdrFocus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"focused": pane})
+}
+
+// HandleNimbalystReveal raises the Nimbalyst desktop app.
+//
+// It cannot select a session, and the response says so rather than reporting
+// success as though it had. Nimbalyst's URL scheme has no route that addresses
+// an AI session, and the MCP tool that could — navigate_to_session — sits
+// behind a bearer token generated at launch and never persisted, so no other
+// process can hold it.
+//
+// The URL is built here rather than taken from the request: a caller-supplied
+// URL handed to xdg-open is an arbitrary-scheme launcher, and this needs to
+// open exactly one thing.
+func (h *Handlers) HandleNimbalystReveal(w http.ResponseWriter, r *http.Request) {
+	if err := nimbalyst.Reveal(); err != nil {
+		writeJSONError(w, "reveal failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"opened": true,
+		// Named so the UI can be honest about what just happened.
+		"landed_on": "project-manager",
+	})
+}
+
+// HandleNimbalystSessions lists what Nimbalyst knows, for the same reason the
+// herdr equivalent exists: sessions it is tracking that claumon may not have a
+// transcript for yet.
+func (h *Handlers) HandleNimbalystSessions(w http.ResponseWriter, r *http.Request) {
+	sessions, err := (nimbalyst.Client{}).List()
+	if err != nil {
+		// Not an error condition: Nimbalyst simply is not installed or has
+		// never run here.
+		writeJSON(w, map[string]any{"available": false, "sessions": []nimbalyst.Session{}})
+		return
+	}
+	writeJSON(w, map[string]any{"available": true, "sessions": sessions})
 }
 
 // HandleHerdrAgents lists what the workspace manager is running, so the

@@ -601,6 +601,16 @@ tr.clickable { cursor: pointer; }
 .fl-name.herdr { color:var(--teal); }
 .fl-herdric { width:11px; height:11px; flex:0 0 11px; color:var(--teal); }
 .fl-herdric use { fill:currentColor; stroke:none; }
+/* The Nimbalyst mark gets the app's own blue, so a session hosted there is
+   told apart from a herdr pane at a glance rather than by reading. The hash
+   strokes are knocked out in the surface colour the way the app's icon knocks
+   them out in white. */
+.fl-nimbic { width:11px; height:11px; flex:0 0 11px; color:#6291f8; cursor:pointer; }
+.fl-nimbic .nb-body { fill:currentColor; stroke:none; }
+.fl-nimbic .nb-hash { fill:none; stroke:var(--bg-surface); stroke-width:1.9; }
+.fl-nimbic:hover { color:#8fb0fb; }
+.fl-nimbic.failed { color:var(--red); }
+.fl-name.nimbalyst { color:#6291f8; }
 /* Where the work happened, under the name of the work. Dim and shrinkable:
    when the label runs out of room the location gives way before the task
    name does, because two rows in one repo are told apart by their names. */
@@ -1345,6 +1355,14 @@ tr.clickable { cursor: pointer; }
   <g id="ic-arrow-down"><path d="M8 3v10M4 9l4 4 4-4"/></g>
   <g id="ic-layers"><path d="M8 2 2 5l6 3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>
   <g id="ic-flag"><path d="M4.5 14V3h7.5l-2 3 2 3H4.5"/></g>
+  <!-- Nimbalyst's mark: a hash inside a starburst, traced from the app's own
+       icon. Drawn as a filled path so it reads at 11px, where the icon's
+       twelve-lobed outline would turn to mush. -->
+  <symbol id="ic-nimbalyst" viewBox="0 0 24 24">
+    <path class="nb-body" d="M12 1.6c.9 0 1.3 1.1 2.2 1.2.9.1 1.6-.8 2.4-.4.8.4.5 1.5 1.1 2.1.6.6 1.7.3 2.1 1.1.4.8-.5 1.5-.4 2.4.1.9 1.2 1.3 1.2 2.2s-1.1 1.3-1.2 2.2c-.1.9.8 1.6.4 2.4-.4.8-1.5.5-2.1 1.1-.6.6-.3 1.7-1.1 2.1-.8.4-1.5-.5-2.4-.4-.9.1-1.3 1.2-2.2 1.2s-1.3-1.1-2.2-1.2c-.9-.1-1.6.8-2.4.4-.8-.4-.5-1.5-1.1-2.1-.6-.6-1.7-.3-2.1-1.1-.4-.8.5-1.5.4-2.4C4.9 12.5 3.8 12.1 3.8 11.2s1.1-1.3 1.2-2.2c.1-.9-.8-1.6-.4-2.4.4-.8 1.5-.5 2.1-1.1.6-.6.3-1.7 1.1-2.1.8-.4 1.5.5 2.4.4.9-.1 1.3-1.2 2.2-1.2z"/>
+    <path class="nb-hash" d="M10.1 6.6 9.4 15.8M14.3 6.6l-.7 9.2M7.3 9.6h9.6M6.9 12.9h9.6"
+          stroke-linecap="round"/>
+  </symbol>
   <!-- herdr's own mark, the same artwork the scratchpad dock renders from
        ~/.local/share/icons/herdr.svg. A symbol rather than a group, because
        the artwork carries its own viewBox and a <use> of a group would be
@@ -4524,6 +4542,17 @@ function flRender() {
     const herdrIcon = inHerdr
       ? `<svg class="fl-herdric"><use href="#ic-herdr"/></svg>`
       : '';
+    // A session hosted by the Nimbalyst desktop app, marked the same way: the
+    // app's own icon on the title in the app's own colour. Clicking it raises
+    // Nimbalyst — it cannot select the session, and the tooltip says so, since
+    // no route or reachable API can do that.
+    const inNimbalyst = !!s.nimbalyst;
+    const nimbIcon = inNimbalyst
+      ? `<svg class="fl-nimbic" viewBox="0 0 24 24"
+              title="open Nimbalyst — it lands on the project manager, not this session">
+           <use href="#ic-nimbalyst"/>
+         </svg>`
+      : '';
     const meta = escHtml(new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
     // A line has exactly two events of its own: it began, and — if its process
@@ -4665,7 +4694,7 @@ function flRender() {
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}"
          style="--fl-line:${lineColor}" data-session="${escHtml(s.session_id)}">
       <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml(flLocation(s))}">
-        <div class="fl-l1">${herdrIcon}${forkIcon}<span class="fl-name${inHerdr ? ' herdr' : ''}">${escHtml(label)}</span></div>
+        <div class="fl-l1">${herdrIcon}${nimbIcon}${forkIcon}<span class="fl-name${inHerdr ? ' herdr' : inNimbalyst ? ' nimbalyst' : ''}">${escHtml(label)}</span></div>
         <div class="fl-l2"><span class="fl-ctx">${ctx}</span><span class="fl-when">${meta}</span></div>
         <span class="fl-grip" title="drag to resize"></span>
       </div>
@@ -4888,6 +4917,16 @@ function flBindRows(host) {
         .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
     }));
 
+  // Raises the app. Deliberately not called "focus": it cannot select the
+  // session, so naming it after herdr's focus would overstate what happens.
+  host.querySelectorAll('.fl-nimbic').forEach(el =>
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
+      fetch('/api/nimbalyst/reveal', { method: 'POST' })
+        .then(r => { if (!r.ok) throw new Error('reveal'); })
+        .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
+    }));
+
   flBindResize(host);
 
   // A marker describes the moment it sits on, not the session it belongs to:
@@ -5084,6 +5123,18 @@ function flTipHtml(s, agent) {
   if (s.herdr) {
     rows.push(['pane', s.herdr.pane_id + (s.herdr.workspace_id ? ' · ' + s.herdr.workspace_id : '')]);
     if (s.herdr.status) rows.push(['herdr', s.herdr.status + (s.herdr.focused ? ' · focused' : '')]);
+  }
+  if (s.nimbalyst) {
+    const n = s.nimbalyst;
+    rows.push(['host', 'Nimbalyst']);
+    if (n.workspace_name) rows.push(['workspace', n.workspace_name]);
+    // Nimbalyst's status is worth its own row rather than folding into the
+    // line's state: waiting_for_input is a thing claumon cannot infer from a
+    // transcript at all, and it is the one worth acting on.
+    if (n.status) rows.push(['nimbalyst', n.status.replace(/_/g, ' ')]);
+    // Its model label is the alias the user picked ("claude-code:haiku"),
+    // which the transcript's resolved model id does not tell you.
+    if (n.model) rows.push(['picked', n.model]);
   }
   rows.push(['agent', agent ? (agent.agent_type || 'subagent') : 'session']);
   if (!agent && s.model) rows.push(['model', shortModel(s.model)]);

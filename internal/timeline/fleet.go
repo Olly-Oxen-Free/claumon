@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fabioconcina/claumon/internal/herdr"
+	"github.com/fabioconcina/claumon/internal/nimbalyst"
 	"github.com/fabioconcina/claumon/internal/parser"
 )
 
@@ -75,6 +76,12 @@ type FleetSession struct {
 	// manager knows about it. Absent when herdr is not running.
 	Herdr *HerdrRef `json:"herdr,omitempty"`
 
+	// Nimbalyst is the app-side view of this session, when it was started
+	// from Nimbalyst rather than a terminal. A session runs in one host or the
+	// other, so in practice this and Herdr are mutually exclusive — but
+	// nothing enforces that, and both are shown if both claim it.
+	Nimbalyst *NimbalystRef `json:"nimbalyst,omitempty"`
+
 	// ForkedFrom names the session this one was split off from, when it was.
 	ForkedFrom *ForkRef `json:"forked_from,omitempty"`
 }
@@ -120,6 +127,34 @@ type HerdrRef struct {
 	Focused bool   `json:"focused,omitempty"`
 }
 
+// NimbalystRef locates a session inside the Nimbalyst desktop app, so the
+// dashboard can name it the way the user named it there.
+//
+// Unlike HerdrRef there is no pane to focus: Nimbalyst has no deep link that
+// selects a session, and its MCP port needs a token no other process can
+// obtain. RevealURL therefore only raises the app, and the UI says so.
+type NimbalystRef struct {
+	// SessionID is Nimbalyst's own id, which its UI addresses the session by.
+	SessionID string `json:"session_id"`
+	// Workspace is the project directory, and WorkspaceName its basename —
+	// the name a person uses for that project.
+	Workspace     string `json:"workspace,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	// Title is the session name shown in Nimbalyst.
+	Title string `json:"title,omitempty"`
+	// Status is Nimbalyst's live view: idle, running, waiting_for_input, or
+	// error. waiting_for_input is one claumon cannot infer at all.
+	Status string `json:"status,omitempty"`
+	// Worktree is the linked worktree's display name, when there is one.
+	Worktree string `json:"worktree,omitempty"`
+	// Model is Nimbalyst's own alias, e.g. "claude-code:haiku". It says which
+	// alias the user picked, which the transcript does not record.
+	Model string `json:"model,omitempty"`
+	// RevealURL raises Nimbalyst. It cannot select the session; see the type
+	// comment.
+	RevealURL string `json:"reveal_url,omitempty"`
+}
+
 // FleetAgent is one subagent, as a span.
 type FleetAgent struct {
 	AgentID     string    `json:"agent_id"`
@@ -144,6 +179,14 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 	panes := map[string]herdr.Agent{}
 	if agents, err := (herdr.Client{}).List(); err == nil {
 		panes = herdr.BySession(agents)
+	}
+
+	// The same treatment as herdr: asked once per request, and a failure means
+	// no enrichment rather than a failed request. Nimbalyst is usually not
+	// running at all, which is indistinguishable from it having no sessions.
+	nimbaly := map[string]nimbalyst.Session{}
+	if sess, err := (nimbalyst.Client{}).List(); err == nil {
+		nimbaly = nimbalyst.BySession(sess)
 	}
 
 	// Whether a session still exists is a question about processes, not about
@@ -264,6 +307,43 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 				tail = now
 			}
 			fs.Spans = Activity(path, tail, fs.IsRunning)
+		}
+
+		if n, ok := nimbaly[s.ID]; ok {
+			fs.Nimbalyst = &NimbalystRef{
+				SessionID:     n.ID,
+				Workspace:     n.Workspace,
+				WorkspaceName: n.WorkspaceName(),
+				Title:         n.Title,
+				Status:        n.Status,
+				Worktree:      n.Worktree,
+				Model:         n.Model,
+				RevealURL:     nimbalyst.RevealURL(n),
+			}
+			// The name the user gave the session in Nimbalyst is the best one
+			// available, on the same reasoning as herdr's tab title: it beats
+			// a title derived from the first user message. Nimbalyst's default
+			// "New Session" is not a name, so it does not win.
+			if n.Title != "" && n.Title != "New Session" {
+				fs.Title = n.Title
+			}
+			// Nimbalyst watches the session itself, so its status settles what
+			// the transcript cannot: a session waiting on a prompt is neither
+			// working nor finished.
+			if n.Status == "running" || n.Status == "waiting_for_input" {
+				fs.IsRunning = true
+			}
+			// A Nimbalyst worktree is the same fact as a git worktree, found a
+			// different way. Prefer what git says, since that is read from the
+			// checkout itself.
+			if fs.Worktree == "" {
+				fs.Worktree = n.Worktree
+			}
+			// A session launched from Nimbalyst has no cwd of its own in the
+			// transcript when it never ran a shell, so the workspace names it.
+			if fs.Repo == "" {
+				fs.Repo = n.WorkspaceName()
+			}
 		}
 
 		// A session's own title falls back to its first user message, which
