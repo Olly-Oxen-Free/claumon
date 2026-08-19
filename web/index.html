@@ -477,6 +477,20 @@ tr.clickable { cursor: pointer; }
 }
 .fl-row.sel .fl-mark { border-width:1.5px; }
 
+/* A split thread: the replayed history is faint, and an elbow drops out of the
+   parent's row at the moment the two diverged. */
+.fl-bar.inherited {
+  background:var(--text-dim); opacity:.22; height:3px; top:11px; cursor:default;
+}
+.fl-bar.inherited:hover { opacity:.35; }
+.fl-fork-link {
+  position:absolute; top:-13px; width:9px; height:21px;
+  border-left:1.5px solid var(--teal);
+  border-bottom:1.5px solid var(--teal);
+  border-bottom-left-radius:9px;
+  opacity:.75; pointer-events:none; z-index:1;
+}
+
 /* Heat view */
 .fl-legend { display:inline-flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); }
 .fl-legend i {
@@ -4206,13 +4220,36 @@ function flRender() {
       const frac = flBurnFraction(s, maxRate);
       barStyle += `;background:${flHeatColor(frac)};opacity:1;height:9px;top:8px`;
     }
+    // A split session's transcript replays its parent's history with the
+    // original timestamps, so its bar would otherwise span the parent's whole
+    // past and read as a duplicate. Draw the inherited stretch faintly and its
+    // own work solid, with an elbow dropping out of the parent at the moment
+    // they diverged — the branch as a shape, not a footnote.
+    let bars = '';
+    let link = '';
+    const dv = s.forked_from && s.forked_from.diverged_at
+      ? new Date(s.forked_from.diverged_at).getTime() : null;
+    if (dv && dv > st && dv < en) {
+      const [ix, iw] = clampBar(st, dv);
+      const [ox, ow] = clampBar(dv, en);
+      bars =
+        `<div class="fl-bar inherited" style="left:${ix}px;width:${iw}px"
+              data-session="${escHtml(s.session_id)}"></div>` +
+        `<div class="fl-bar session${s.is_running ? ' live' : ''}"
+              style="${flHeat ? barStyle.replace(/left:[^;]+;width:[^;]+/, `left:${ox}px;width:${ow}px`) : `left:${ox}px;width:${ow}px`}"
+              data-session="${escHtml(s.session_id)}"></div>`;
+      link = `<i class="fl-fork-link" style="left:${ox}px"></i>`;
+    } else {
+      bars = `<div class="fl-bar session${s.is_running ? ' live' : ''}"
+                   style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>`;
+    }
+
     rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}" data-session="${escHtml(s.session_id)}">
       <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml((s.title || s.cwd || ''))}">
         ${forkIcon}<span class="fl-name">${escHtml(label)}</span><span class="fl-when">${meta}</span>
       </div>
       <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
-        <div class="fl-bar session${s.is_running ? ' live' : ''}"
-             style="${barStyle}" data-session="${escHtml(s.session_id)}"></div>
+        ${bars}${link}
         ${marks}
       </div>
     </div>`);
@@ -4534,7 +4571,11 @@ function flTipHtml(s, agent) {
     rows.push(['split from', (parent ? parent + ' · ' : '') + ff.session_id.slice(0, 8)]);
     // Say how the lineage was established: /branch names the message, /fork
     // leaves only a copied session id behind.
-    rows.push(['lineage', ff.inferred ? 'inferred from copied history' : 'at message ' + (ff.message_uuid || '').slice(0, 8)]);
+    rows.push(['lineage', ff.inferred ? 'inferred from copied history' : 'explicit']);
+    if (ff.diverged_at) {
+      rows.push(['diverged', new Date(ff.diverged_at).toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })]);
+    }
   }
   if (s.herdr) {
     rows.push(['pane', s.herdr.pane_id + (s.herdr.workspace_id ? ' · ' + s.herdr.workspace_id : '')]);

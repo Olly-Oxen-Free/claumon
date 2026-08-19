@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -82,6 +83,11 @@ type ForkRef struct {
 	// Inferred is true when the lineage came from the session_id mismatch
 	// rather than an explicit field, so a reader knows how firm it is.
 	Inferred bool `json:"inferred,omitempty"`
+	// DivergedAt is when this session stopped replaying inherited history and
+	// began its own work. Without it a child's bar spans its parent's entire
+	// past, because a split copies the transcript with the original
+	// timestamps — the two would look like duplicates rather than a branch.
+	DivergedAt time.Time `json:"diverged_at,omitzero"`
 }
 
 // HerdrRef locates a session in the terminal workspace manager, so the
@@ -163,6 +169,9 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int) (*Fleet, er
 				branch = b
 			}
 			forked = detectFork(path, s.ID)
+			if forked != nil {
+				forked.DivergedAt = divergedAt(path, s.ID, forked)
+			}
 		}
 
 		fs := FleetSession{
@@ -255,6 +264,88 @@ func detectFork(path, ownID string) *ForkRef {
 		}
 	}
 	return inferred
+}
+
+// How much of a transcript's tail to read when looking for the divergence
+// point. A split's own work sits at the end of the file, so the boundary is
+// near it; 4MB covers a long working session without reading a 16MB history.
+const divergeTailBytes = 4 << 20
+
+// divergedAt finds when a split session's own work begins.
+//
+// Read from the end, because that is where the answer is: everything before the
+// boundary is a copy of the parent. Scanning forward would mean reading the
+// entire inherited history to reach the one line that matters.
+//
+// The signal differs by route, matching how each is recorded:
+//
+//   - explicit (/branch): inherited lines carry forkedFrom, own lines do not.
+//   - inferred (/fork): inherited lines carry the parent's session_id, own
+//     lines carry this session's.
+func divergedAt(path, ownID string, ref *ForkRef) time.Time {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}
+	}
+	start := info.Size() - divergeTailBytes
+	if start < 0 {
+		start = 0
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return time.Time{}
+	}
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	// A mid-file seek lands inside a line; discard the partial one.
+	if start > 0 {
+		sc.Scan()
+	}
+
+	// Walk forward through the tail, keeping the earliest own line seen after
+	// the last inherited one. Resetting on each inherited line is what handles
+	// interleaving: only the final run of own lines counts.
+	var earliestOwn time.Time
+	for sc.Scan() {
+		var l struct {
+			Timestamp      time.Time       `json:"timestamp"`
+			SessionIDSnake string          `json:"session_id"`
+			ForkedFrom     json.RawMessage `json:"forkedFrom"`
+		}
+		if json.Unmarshal(sc.Bytes(), &l) != nil {
+			continue
+		}
+		inherited := false
+		if ref.Inferred {
+			inherited = l.SessionIDSnake == ref.SessionID
+		} else {
+			inherited = len(l.ForkedFrom) > 0 && string(l.ForkedFrom) != "null"
+		}
+		if inherited {
+			earliestOwn = time.Time{}
+			continue
+		}
+		// Own line. Only the first of the current run is the boundary, and
+		// only lines that carry a time can mark it.
+		if l.Timestamp.IsZero() {
+			continue
+		}
+		if ref.Inferred && l.SessionIDSnake != ownID {
+			// Bookkeeping lines carry no session id; they are neither
+			// inherited nor evidence of new work.
+			continue
+		}
+		if earliestOwn.IsZero() {
+			earliestOwn = l.Timestamp
+		}
+	}
+	return earliestOwn
 }
 
 // sessionContext reads the working tree and branch from the transcript's first
