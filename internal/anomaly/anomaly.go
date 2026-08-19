@@ -12,6 +12,11 @@
 //     read, edit, read, edit — making no progress. Detected as a repeating
 //     period of 1 to 4 calls over a recent tail of the call sequence.
 //
+//     A cycle is matched on the call's *arguments*, not just its name. Four
+//     consecutive Bash calls are ordinary work; the same Bash command four
+//     times is a loop. Matching on name alone flags every busy session, which
+//     is worse than not detecting loops at all.
+//
 // Both take a series and return findings; neither touches the network or the
 // disk, so both are fully unit-testable.
 package anomaly
@@ -177,13 +182,26 @@ func RateSpike(cfg Config, gauge string, history []RatePoint) (Finding, bool) {
 	}, true
 }
 
+// Call is one tool invocation. Name is what the user sees; Key is what
+// equality is judged on — the tool plus its arguments — so repeating the same
+// tool with different arguments is not mistaken for a loop.
+type Call struct {
+	Name string
+	Key  string
+}
+
+// NewCall builds a Call whose identity includes its arguments.
+func NewCall(name, args string) Call {
+	return Call{Name: name, Key: name + "\x00" + args}
+}
+
 // ToolLoop looks for a short repeating cycle at the end of a tool-call
 // sequence.
 //
 // Only the tail matters: a session that looped earlier and recovered is not
 // stuck now. Periods are tried shortest first so a genuine 1-call hammer is
 // not reported as a longer cycle that happens to contain it.
-func ToolLoop(cfg Config, sessionID string, calls []string, at time.Time) (Finding, bool) {
+func ToolLoop(cfg Config, sessionID string, calls []Call, at time.Time) (Finding, bool) {
 	cfg = cfg.withDefaults()
 	tail := calls
 	if len(tail) > cfg.LoopWindow {
@@ -196,19 +214,35 @@ func ToolLoop(cfg Config, sessionID string, calls []string, at time.Time) (Findi
 			continue
 		}
 		window := tail[len(tail)-need:]
-		if !repeatsWithPeriod(window, period) {
+		if !repeatsWithPeriod(keys(window), period) {
 			continue
 		}
 		return Finding{
 			Kind:    KindToolLoop,
 			Subject: sessionID,
 			Detail: "the same " + itoa(period) + "-call cycle repeated " +
-				itoa(cfg.LoopRepeats) + " times: " + join(window[:period], " → "),
+				itoa(cfg.LoopRepeats) + " times: " + join(names(window[:period]), " → "),
 			Score: float64(cfg.LoopRepeats),
 			At:    at,
 		}, true
 	}
 	return Finding{}, false
+}
+
+func keys(calls []Call) []string {
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = c.Key
+	}
+	return out
+}
+
+func names(calls []Call) []string {
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = c.Name
+	}
+	return out
 }
 
 // repeatsWithPeriod reports whether xs is the same period-length block over

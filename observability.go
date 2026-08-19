@@ -304,12 +304,15 @@ func shortID(id string) string {
 	return id
 }
 
-// toolCallSequence returns the session's tool-call names in order.
+// toolCallSequence returns the session's tool calls in order, each identified
+// by tool name plus arguments.
 //
-// Only the tail matters to the loop detector, but a transcript has to be read
+// The arguments are part of the identity because the detector must not treat a
+// run of distinct Bash commands as a loop; only the same command repeated is
+// one. Only the tail matters to the detector, but a transcript has to be read
 // from the start to be parsed at all; sessions are capped at a day's work here
 // (DiscoverTodaySessions), so this stays cheap.
-func toolCallSequence(claudeDir, sessionID string) ([]string, error) {
+func toolCallSequence(claudeDir, sessionID string) ([]anomaly.Call, error) {
 	path := parser.FindSessionFile(claudeDir, sessionID)
 	if path == "" {
 		return nil, nil
@@ -318,11 +321,11 @@ func toolCallSequence(claudeDir, sessionID string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var calls []string
+	var calls []anomaly.Call
 	for _, m := range messages {
 		for _, tc := range m.ToolCalls {
 			if tc.Name != "" {
-				calls = append(calls, tc.Name)
+				calls = append(calls, anomaly.NewCall(tc.Name, string(tc.Input)))
 			}
 		}
 	}

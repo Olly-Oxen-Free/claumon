@@ -156,6 +156,8 @@ Two detectors, for the two ways an agent session goes wrong quietly:
   one runaway session moves a mean enough to hide itself, while the median barely
   shifts, so a second spike is still caught after a first.
 - **Tool loops** — an agent repeating the same 1-to-4 call cycle with no progress.
+  A cycle is matched on the call's arguments, not just its name: four consecutive
+  `Bash` calls are ordinary work, while the same `Bash` command four times is a loop.
   Only the tail of the call sequence is examined, so a session that looped earlier and
   recovered is not reported.
 

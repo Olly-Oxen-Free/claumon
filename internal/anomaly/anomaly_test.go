@@ -78,18 +78,45 @@ func TestModifiedZHandlesAZeroSpreadBaseline(t *testing.T) {
 	}
 }
 
+// seq builds calls whose arguments differ per position, i.e. ordinary work.
+func seq(names ...string) []Call {
+	out := make([]Call, len(names))
+	for i, n := range names {
+		out[i] = NewCall(n, "arg"+itoa(i))
+	}
+	return out
+}
+
+// cycle builds `repeats` copies of the same argument-identical block.
+func cycle(repeats int, names ...string) []Call {
+	var out []Call
+	for r := 0; r < repeats; r++ {
+		for _, n := range names {
+			out = append(out, NewCall(n, "same-"+n))
+		}
+	}
+	return out
+}
+
 func TestNoLoopInVariedWork(t *testing.T) {
-	calls := []string{"Read", "Grep", "Edit", "Bash", "Read", "Write", "Bash", "Edit"}
+	calls := seq("Read", "Grep", "Edit", "Bash", "Read", "Write", "Bash", "Edit")
 	if f, ok := ToolLoop(DefaultConfig(), "s1", calls, time.Now()); ok {
 		t.Fatalf("varied work flagged as a loop: %+v", f)
 	}
 }
 
-func TestTwoCallCycleIsALoop(t *testing.T) {
-	calls := []string{"Grep", "Bash"}
-	for i := 0; i < 4; i++ {
-		calls = append(calls, "Read", "Edit")
+func TestConsecutiveDistinctCallsOfOneToolAreNotALoop(t *testing.T) {
+	// Four Bash calls running four different commands is ordinary work. This
+	// is the false positive that matching on tool name alone produces.
+	calls := seq("Bash", "Bash", "Bash", "Bash", "Bash", "Bash")
+	if f, ok := ToolLoop(DefaultConfig(), "s1", calls, time.Now()); ok {
+		t.Fatalf("distinct commands flagged as a loop: %+v", f)
 	}
+}
+
+func TestTwoCallCycleIsALoop(t *testing.T) {
+	calls := seq("Grep", "Bash")
+	calls = append(calls, cycle(4, "Read", "Edit")...)
 	f, ok := ToolLoop(DefaultConfig(), "s1", calls, time.Now())
 	if !ok {
 		t.Fatal("read/edit repeated four times is a loop")
@@ -103,7 +130,8 @@ func TestTwoCallCycleIsALoop(t *testing.T) {
 }
 
 func TestRepeatedSingleCallIsAPeriodOneLoop(t *testing.T) {
-	calls := []string{"Bash", "Bash", "Bash", "Bash"}
+	// The same command, verbatim, four times over.
+	calls := cycle(4, "Bash")
 	f, ok := ToolLoop(DefaultConfig(), "s1", calls, time.Now())
 	if !ok {
 		t.Fatal("the same call four times running is a loop")
@@ -115,15 +143,15 @@ func TestRepeatedSingleCallIsAPeriodOneLoop(t *testing.T) {
 
 func TestARecoveredLoopIsNotReported(t *testing.T) {
 	// Looped earlier, then moved on: not stuck now.
-	calls := []string{"Read", "Edit", "Read", "Edit", "Read", "Edit", "Read", "Edit"}
-	calls = append(calls, "Bash", "Write", "Grep", "WebFetch")
+	calls := cycle(4, "Read", "Edit")
+	calls = append(calls, seq("Bash", "Write", "Grep", "WebFetch")...)
 	if _, ok := ToolLoop(DefaultConfig(), "s1", calls, time.Now()); ok {
 		t.Fatal("only the tail should count")
 	}
 }
 
 func TestTooFewCallsIsNotALoop(t *testing.T) {
-	if _, ok := ToolLoop(DefaultConfig(), "s1", []string{"Read", "Edit"}, time.Now()); ok {
+	if _, ok := ToolLoop(DefaultConfig(), "s1", seq("Read", "Edit"), time.Now()); ok {
 		t.Fatal("two calls cannot establish a repeat")
 	}
 }
