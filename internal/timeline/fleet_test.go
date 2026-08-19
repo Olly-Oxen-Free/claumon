@@ -2,8 +2,10 @@ package timeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -264,5 +266,41 @@ func TestBurnSeriesIsCachedUntilTheFileGrows(t *testing.T) {
 	after := sum(BurnSeries(path, start, end))
 	if after <= before {
 		t.Fatalf("series did not pick up appended usage: %d then %d", before, after)
+	}
+}
+
+// A branch that diverges early and then works for a long time puts the
+// boundary far from the end of the file. An earlier version only read the last
+// 4MB, so on a 40MB transcript it never saw an inherited line, took the first
+// line in its window as the start of own work, and reported the divergence as
+// minutes ago — drawing almost the whole child as inherited history with the
+// split pinned near the right edge.
+func TestDivergenceFoundFarFromTheEnd(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "child.jsonl")
+
+	var b strings.Builder
+	// A long inherited history: enough to push the boundary well past any
+	// fixed-size tail window.
+	pad := strings.Repeat("x", 4096)
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&b, `{"type":"user","sessionId":"child","forkedFrom":{"sessionId":"parent","messageUuid":"u%d"},`+
+			`"timestamp":"2026-08-19T02:%02d:00Z","pad":"%s"}`+"\n", i, i%60, pad)
+	}
+	// The divergence: the first line that is this session's own work.
+	fmt.Fprintf(&b, `{"type":"user","sessionId":"child","timestamp":"2026-08-19T08:17:40Z"}`+"\n")
+	// ...followed by a long stretch of its own work.
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&b, `{"type":"assistant","sessionId":"child","timestamp":"2026-08-19T09:%02d:00Z","pad":"%s"}`+"\n",
+			i%60, pad)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := divergedAt(path, "child", &ForkRef{SessionID: "parent"})
+	want := time.Date(2026, 8, 19, 8, 17, 40, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("divergedAt = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
 	}
 }

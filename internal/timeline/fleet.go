@@ -2,9 +2,9 @@ package timeline
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -318,16 +318,20 @@ func detectFork(path, ownID string) *ForkRef {
 	return inferred
 }
 
-// How much of a transcript's tail to read when looking for the divergence
-// point. A split's own work sits at the end of the file, so the boundary is
-// near it; 4MB covers a long working session without reading a 16MB history.
-const divergeTailBytes = 4 << 20
-
 // divergedAt finds when a split session's own work begins.
 //
-// Read from the end, because that is where the answer is: everything before the
-// boundary is a copy of the parent. Scanning forward would mean reading the
-// entire inherited history to reach the one line that matters.
+// The whole file is walked, not a tail window. An earlier version seeked to the
+// last 4MB on the reasoning that a split's own work sits at the end — but the
+// inherited history is what is long, and a session that branches early then
+// works for a day puts the boundary tens of megabytes from the end. Landing
+// past it meant seeing no inherited line at all, so the first line in the
+// window looked like the start of own work and the divergence was reported as
+// minutes ago. The bar then drew almost the whole child as inherited history
+// with a divergence pinned near the right edge, which is exactly backwards.
+//
+// The cost is one sequential pass with no JSON decoding on the common line:
+// the marker is found by byte, and only a line whose class has changed is
+// decoded for its timestamp.
 //
 // The signal differs by route, matching how each is recorded:
 //
@@ -341,56 +345,47 @@ func divergedAt(path, ownID string, ref *ForkRef) time.Time {
 	}
 	defer f.Close()
 
-	info, err := f.Stat()
-	if err != nil {
-		return time.Time{}
-	}
-	start := info.Size() - divergeTailBytes
-	if start < 0 {
-		start = 0
-	}
-	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return time.Time{}
-	}
-
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	// A mid-file seek lands inside a line; discard the partial one.
-	if start > 0 {
-		sc.Scan()
-	}
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
-	// Walk forward through the tail, keeping the earliest own line seen after
-	// the last inherited one. Resetting on each inherited line is what handles
-	// interleaving: only the final run of own lines counts.
+	forkedKey := []byte(`"forkedFrom":`)
+	parentKey := []byte(`"session_id":"` + ref.SessionID + `"`)
+	ownKey := []byte(`"session_id":"` + ownID + `"`)
+
+	// Walk forward, keeping the earliest own line seen after the last inherited
+	// one. Resetting on each inherited line is what handles interleaving: only
+	// the final run of own lines counts.
 	var earliestOwn time.Time
 	for sc.Scan() {
-		var l struct {
-			Timestamp      time.Time       `json:"timestamp"`
-			SessionIDSnake string          `json:"session_id"`
-			ForkedFrom     json.RawMessage `json:"forkedFrom"`
-		}
-		if json.Unmarshal(sc.Bytes(), &l) != nil {
-			continue
-		}
+		b := sc.Bytes()
+
+		// Classify by byte. Every line is tested; only the ones that could
+		// move the boundary are decoded.
 		inherited := false
 		if ref.Inferred {
-			inherited = l.SessionIDSnake == ref.SessionID
+			inherited = bytes.Contains(b, parentKey)
 		} else {
-			inherited = len(l.ForkedFrom) > 0 && string(l.ForkedFrom) != "null"
+			inherited = bytes.Contains(b, forkedKey) &&
+				!bytes.Contains(b, []byte(`"forkedFrom":null`))
 		}
 		if inherited {
 			earliestOwn = time.Time{}
 			continue
 		}
-		// Own line. Only the first of the current run is the boundary, and
-		// only lines that carry a time can mark it.
-		if l.Timestamp.IsZero() {
-			continue
-		}
-		if ref.Inferred && l.SessionIDSnake != ownID {
+		if ref.Inferred && !bytes.Contains(b, ownKey) {
 			// Bookkeeping lines carry no session id; they are neither
 			// inherited nor evidence of new work.
+			continue
+		}
+		// A candidate for the boundary. Only now is decoding worth it, and
+		// only the first of the current run counts.
+		if !earliestOwn.IsZero() {
+			continue
+		}
+		var l struct {
+			Timestamp time.Time `json:"timestamp"`
+		}
+		if json.Unmarshal(b, &l) != nil || l.Timestamp.IsZero() {
 			continue
 		}
 		if earliestOwn.IsZero() {
