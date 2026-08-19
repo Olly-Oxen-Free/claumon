@@ -277,10 +277,8 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 		out.Sessions = append(out.Sessions, fs)
 	}
 
-	// Newest first: the thing you just ran is the thing you are looking for.
-	sort.SliceStable(out.Sessions, func(i, j int) bool {
-		return out.Sessions[i].StartedAt.After(out.Sessions[j].StartedAt)
-	})
+	sortFleet(out.Sessions)
+
 	return out, nil
 }
 
@@ -557,4 +555,36 @@ func repoLabel(cwd string) string {
 		}
 	}
 	return filepath.Base(cwd)
+}
+
+// sortFleet ranks rows by how current each session is.
+//
+// Ordered by how current a session is, which is a question about its last
+// activity rather than its first.
+//
+// Sorting by StartedAt ranked a session by when it opened, so a long-lived
+// one that is still running sank below a five-minute session that happened
+// to start later — the row you are actually working in could sit halfway
+// down a list of things that finished hours ago. Start time is also the
+// least stable key here: a split session inherits its parent's first
+// timestamp, so three branches of one thread all claim the same start and
+// scatter among rows they have nothing to do with.
+//
+// Live sessions come first as a block, because "still going" outranks any
+// amount of recency among things that have stopped. Within each block the
+// most recent activity leads.
+func sortFleet(sessions []FleetSession) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		a, b := sessions[i], sessions[j]
+		if a.IsRunning != b.IsRunning {
+			return a.IsRunning
+		}
+		if !a.EndedAt.Equal(b.EndedAt) {
+			return a.EndedAt.After(b.EndedAt)
+		}
+		// Same last activity: a tie among live sessions, which all report
+		// "now". Longest-running first, so the session with the most behind it
+		// leads rather than the order falling to however the files were read.
+		return a.StartedAt.Before(b.StartedAt)
+	})
 }

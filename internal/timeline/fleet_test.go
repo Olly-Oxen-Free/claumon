@@ -304,3 +304,38 @@ func TestDivergenceFoundFarFromTheEnd(t *testing.T) {
 		t.Errorf("divergedAt = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
 	}
 }
+
+func TestFleetOrdersByCurrencyNotStartTime(t *testing.T) {
+	base := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	mk := func(id string, startMin, endMin int, running bool) FleetSession {
+		return FleetSession{
+			SessionID: id,
+			StartedAt: base.Add(time.Duration(startMin) * time.Minute),
+			EndedAt:   base.Add(time.Duration(endMin) * time.Minute),
+			IsRunning: running,
+		}
+	}
+	// A short session that started recently and finished, against a long one
+	// that started much earlier and is still going. Sorting by start time put
+	// the finished one on top; it is the running one you are working in.
+	sessions := []FleetSession{
+		mk("brief", 300, 305, false),
+		mk("live-old", 0, 600, true),
+		mk("done-recent", 200, 400, false),
+		mk("live-new", 100, 600, true),
+	}
+	sortFleet(sessions)
+
+	got := []string{}
+	for _, s := range sessions {
+		got = append(got, s.SessionID)
+	}
+	// Live block first (longest-running leads on the tie), then the stopped
+	// ones by most recent activity.
+	want := []string{"live-old", "live-new", "done-recent", "brief"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
