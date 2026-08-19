@@ -4464,6 +4464,7 @@ function flRender() {
   flBindControls(host);
   flBindRows(host);
   tlRenderFilterChip();
+  flDropStaleTip();
 
   // Open at the right-hand edge, which is the end of the window. Sessions are
   // listed newest first, so a left-aligned scroll hides exactly the rows the
@@ -4604,10 +4605,11 @@ function flBindRows(host) {
       if (!s) return;
       tip.innerHTML = flMarkTipHtml(s, el.dataset.mark, el.dataset.agent, el.dataset.detail);
       tip.style.display = 'block';
+      flTipAnchor = el;
       flPlaceTip(ev);
     });
     el.addEventListener('mousemove', flPlaceTip);
-    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; flTipAnchor = null; });
     if (el.dataset.mark === 'spawn') {
       el.addEventListener('click', ev => {
         ev.stopPropagation();
@@ -4648,10 +4650,11 @@ function flBindRows(host) {
       const a = el.dataset.agent && (s.agents || []).find(y => y.agent_id === el.dataset.agent);
       tip.innerHTML = flTipHtml(s, a || null);
       tip.style.display = 'block';
+      flTipAnchor = el;
       flPlaceTip(ev);
     });
     el.addEventListener('mousemove', flPlaceTip);
-    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; flTipAnchor = null; });
   });
 }
 
@@ -4684,6 +4687,25 @@ function flOpenAgent(sessionId, agentId) {
 // edge. This was lost when the previous chart was removed, leaving every
 // hover to throw before the tooltip could be positioned — which is why none
 // of them appeared.
+// The element the tooltip is currently describing, so a re-render can tell
+// whether it still exists.
+let flTipAnchor = null;
+
+// Hides the tooltip if whatever it was describing is gone from the document.
+//
+// Clicking a bar focuses the session, which rebuilds the map; the hovered
+// element is destroyed mid-hover so its mouseleave never fires, and the tooltip
+// used to sit there describing something no longer on screen until the pointer
+// happened to cross another bar. Checking the anchor rather than hiding on every
+// render means a live refresh does not yank a tooltip out from under a reader
+// whose pointer has not moved.
+function flDropStaleTip() {
+  if (flTipAnchor && flTipAnchor.isConnected) return;
+  flTipAnchor = null;
+  const tip = document.getElementById('tl-tip');
+  if (tip) tip.style.display = 'none';
+}
+
 function flPlaceTip(ev) {
   const tip = document.getElementById('tl-tip');
   const pad = 14;
