@@ -146,6 +146,13 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 		panes = herdr.BySession(agents)
 	}
 
+	// Whether a session still exists is a question about processes, not about
+	// transcripts. Claude Code writes ~/.claude/sessions/{PID}.json for each
+	// live session, and BuildProcessMap keeps only the entries whose process is
+	// actually running — so a session in this map is alive and one absent from
+	// it has ended, whatever its file mtimes suggest.
+	live := parser.BuildProcessMap(claudeDir)
+
 	if scanLimit <= 0 {
 		scanLimit = 500
 	}
@@ -191,6 +198,12 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 			}
 		}
 
+		// The PID file is the authority. A summary's own IsRunning is inferred
+		// from file activity, which calls a session that has been quiet for an
+		// hour dead and one whose transcript was just touched alive — neither
+		// of which is the question.
+		_, alive := live[s.ID]
+
 		fs := FleetSession{
 			SessionID:  s.ID,
 			Cwd:        cwd,
@@ -202,7 +215,7 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 			CostUSD:    s.EstimatedCostUSD,
 			Tokens:     s.InputTokens + s.OutputTokens + s.CacheReadTokens + s.CacheCreateTokens,
 			Messages:   s.MessageCount,
-			IsRunning:  s.IsRunning,
+			IsRunning:  alive,
 			ForkedFrom: forked,
 		}
 		if cwd != "" {
@@ -231,11 +244,7 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 				Status:      h.Status,
 				Focused:     h.Focused,
 			}
-			// herdr watches the process, so its view of "working" beats an
-			// inference drawn from transcript mtimes.
-			if h.Status == "working" {
-				fs.IsRunning = true
-			}
+
 			// herdr's tab title is the name the user gave this task. It beats
 			// anything derived from the transcript, so it wins outright rather
 			// than only filling a gap.

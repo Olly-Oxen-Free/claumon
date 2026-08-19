@@ -542,9 +542,8 @@ tr.clickable { cursor: pointer; }
 .fl-markic { width:9px; height:9px; display:block; color:var(--text-dim); }
 /* Optical centring. Each glyph's ink occupies a different part of the shared
    16x16 box, so they are nudged individually rather than redrawn. */
-.fl-mark.end .fl-markic    { transform:translate(0.5px, 0); }
-.fl-mark.start .fl-markic  { transform:translate(0, -0.5px); }
-.fl-mark.resume .fl-markic { transform:translate(0.5px, 0); }
+.fl-mark.end .fl-markic   { transform:translate(0.5px, 0); }
+.fl-mark.start .fl-markic { transform:translate(0, -0.5px); }
 .fl-markic use { fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 /* Every stop is the same object — ring, background fill, dim glyph — and only
    the glyph inside differs. The terminus used to be filled solid with an
@@ -1363,8 +1362,6 @@ tr.clickable { cursor: pointer; }
           <path d="M2794 3710 c-129 -33 -299 -135 -359 -214 -21 -28 -26 -42 -21 -63 9 -38 154 -178 199 -192 32 -11 41 -9 104 23 171 86 354 70 475 -43 150 -138 150 -379 0 -511 -107 -95 -278 -94 -386 2 l-46 40 -11 -29 c-16 -40 -14 -122 4 -164 60 -144 264 -222 452 -174 360 92 559 494 430 868 -36 103 -81 173 -175 267 -71 72 -100 93 -180 132 -52 26 -127 54 -167 62 -96 21 -230 20 -319 -4z M2183 3695 c-116 -32 -221 -108 -273 -199 -17 -28 -30 -54 -30 -58 0 -4 20 1 45 12 66 28 220 68 294 76 64 7 65 7 137 83 40 41 71 77 69 79 -2 2 -21 8 -42 13 -55 12 -140 10 -200 -6z M2212 3388 c-159 -22 -390 -122 -559 -241 -299 -210 -585 -600 -609 -828 -12 -118 40 -251 125 -318 96 -76 178 -98 426 -116 110 -8 224 -21 254 -29 125 -34 230 -115 272 -211 11 -24 24 -81 30 -127 20 -170 65 -271 166 -374 34 -35 63 -65 63 -67 0 -1 -10 -27 -22 -57 -29 -76 -37 -259 -14 -350 42 -170 158 -318 311 -397 44 -23 98 -46 120 -52 22 -6 45 -14 51 -18 5 -5 15 -48 22 -96 6 -48 14 -92 17 -97 4 -6 415 -10 1131 -10 l1124 0 0 1584 0 1585 -55 -19 c-84 -29 -143 -68 -232 -154 l-83 -78 -54 49 c-111 102 -233 151 -391 160 -113 6 -199 -10 -298 -54 l-60 -27 -26 34 c-37 51 -120 134 -127 128 -3 -4 0 -34 7 -67 17 -89 7 -268 -21 -356 -103 -328 -377 -545 -688 -545 -161 0 -273 41 -373 137 -37 35 -66 75 -85 116 -79 173 -8 407 124 407 44 0 68 -14 117 -66 74 -78 167 -82 238 -9 60 62 72 147 33 231 -42 90 -120 130 -238 122 -50 -4 -85 -14 -131 -37 -89 -45 -122 -52 -176 -40 -92 20 -262 163 -302 253 -11 25 -21 45 -22 45 -1 -1 -30 -6 -65 -11z m-256 -505 c115 -88 129 -102 132 -131 2 -18 -2 -40 -9 -49 -7 -8 -69 -55 -138 -105 -103 -73 -130 -88 -151 -83 -35 8 -51 34 -48 74 3 31 12 42 83 92 44 31 80 61 82 66 1 4 -30 31 -69 58 -39 28 -77 56 -85 63 -18 19 -16 72 4 94 32 35 63 23 199 -79z m528 -88 c23 -24 28 -52 14 -82 l-13 -28 -141 -3 c-130 -2 -142 -1 -158 17 -23 26 -24 66 -1 91 16 18 32 20 151 20 105 0 136 -3 148 -15z"/>
     </g></g>
   </symbol>
-  <g id="ic-pause"><path d="M6 4v8M10 4v8"/></g>
-  <g id="ic-play"><path d="M5 3l8 5-8 5z"/></g>
   <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
 </defs></svg>
 <div class="tabs">
@@ -4537,60 +4534,16 @@ function flRender() {
       : '';
     const meta = escHtml(new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
-    // Key moments are marked on the bar itself, so a spawn or a finish is
-    // visible without opening the row. Agents spawning is the one that
-    // matters most: it is where a session's cost and time multiply.
+    // A line has exactly two events of its own: it began, and — if its process
+    // is gone — it ended. Everything between is state, not event: a cold
+    // context is drawn dotted and carries no mark, because nothing happened.
     //
-    // Every drawn stretch terminates in a stop at each end. A line that simply
-    // stopped and later resumed left the eye to guess whether the session had
-    // ended or the view had clipped it; a stop at the break and another at the
-    // return say which. The session's own start and end are the first and last
-    // of these, so they are not drawn separately.
+    // An earlier version put a "pause" and a "resume" at every long gap. Those
+    // are not things that occur: a session does not pause, it goes cold, and it
+    // does not resume, it simply gets another message.
     let marks = '';
-    const drawn = (s.spans || []).filter(sp => sp.kind === 'active');
-    if (drawn.length) {
-      // Consecutive active spans separated only by an idle bridge are one
-      // continuous line: the dashes already carry that story, and ringing
-      // both sides of every lull would bury the breaks that matter.
-      const runs = [];
-      for (const sp of drawn) {
-        const a = new Date(sp.from).getTime();
-        const b = new Date(sp.to).getTime();
-        const prev = runs[runs.length - 1];
-        // Bridged by an idle span, so the line never actually broke.
-        const bridged = prev && (s.spans || []).some(g =>
-          g.kind === 'idle' &&
-          Math.abs(new Date(g.from).getTime() - prev.to) < 1000 &&
-          Math.abs(new Date(g.to).getTime() - a) < 1000);
-        if (bridged) prev.to = b; else runs.push({ from: a, to: b });
-      }
-      runs.forEach((r, i) => {
-        const first = i === 0;
-        const last = i === runs.length - 1;
-        // The line's own beginning is a launch; a return after a break is a
-        // resume. Likewise its true end versus a pause partway through.
-        const openKind = first ? 'start' : 'resume';
-        const openIcon = first ? 'ic-rocket' : 'ic-play';
-        if (r.from >= from && r.from <= to) {
-          marks += `<span class="fl-mark ${openKind}" style="left:${x(r.from)}px"` +
-            ` data-session="${escHtml(s.session_id)}" data-mark="${openKind}"` +
-            ` data-at="${r.from}">${flMark(openIcon)}</span>`;
-        }
-        // A still-running session's last stretch has no end yet — the line is
-        // going somewhere, and capping it would say otherwise.
-        if (last && s.is_running) return;
-        const closeKind = last ? 'end' : 'pause';
-        const closeIcon = last ? 'ic-flag' : 'ic-pause';
-        if (r.to >= from && r.to <= to) {
-          marks += `<span class="fl-mark ${closeKind}" style="left:${x(r.to)}px"` +
-            ` data-session="${escHtml(s.session_id)}" data-mark="${closeKind}"` +
-            ` data-at="${r.to}">${flMark(closeIcon)}</span>`;
-        }
-      });
-    } else {
-      // No spans: the transcript could not be read, so the bar is one block
-      // and its ends are the session's own.
-      marks = `<span class="fl-mark start" style="left:${x(st)}px"` +
+    if (st >= from && st <= to) {
+      marks += `<span class="fl-mark start" style="left:${x(st)}px"` +
         ` data-session="${escHtml(s.session_id)}" data-mark="start">${flMark('ic-rocket')}</span>`;
     }
     for (const a of agents) {
@@ -4613,9 +4566,11 @@ function flRender() {
           ` data-detail="${escHtml(c.detail || '')}">${flMark('ic-layers')}</span>`;
       }
     }
-    // A session with no spans still needs its terminus; one with spans got it
-    // from the run loop above.
-    if (!drawn.length && !s.is_running && en >= from && en <= to) {
+    // The end mark means the process that held this session is gone — it is no
+    // longer tracked anywhere, and nothing more will ever be added to it. That
+    // is why it hangs on is_running, which now comes from the PID file rather
+    // than from guessing at file activity.
+    if (!s.is_running && en >= from && en <= to) {
       marks += `<span class="fl-mark end" style="left:${x(en)}px"` +
         ` data-session="${escHtml(s.session_id)}" data-mark="end">${flMark('ic-flag')}</span>`;
     }
@@ -5073,24 +5028,6 @@ function flMarkTipHtml(s, mark, agentId, detail) {
       `<dt>detail</dt><dd>${escHtml(arguments[3] || '')}</dd></dl>`;
   }
 
-  // A pause and a resume sit inside the session, so they carry their own
-  // timestamp rather than the session's bounds.
-  if (mark === 'pause' || mark === 'resume') {
-    const at = Number(arguments[4]);
-    const isPause = mark === 'pause';
-    const rows = [
-      [isPause ? 'paused' : 'resumed', at ? fmt(at) : '—'],
-      ['repo', (s.repo || '—') + (s.worktree ? ' ⑂ ' + s.worktree : '')],
-    ];
-    // How long the gap either side of this stop ran, which is the thing the
-    // break in the line is showing.
-    const gap = flGapAround(s, at, isPause);
-    if (gap) rows.push([isPause ? 'away for' : 'was away', fmtDur(gap)]);
-    return `<h4>session ${isPause ? 'paused' : 'resumed'}</h4>` +
-      (s.title ? `<div class="sub">${escHtml(s.title)}</div>` : '') +
-      '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
-  }
-
   const isStart = mark === 'start';
   const when = isStart ? s.started_at : s.ended_at;
   const rows = [
@@ -5104,23 +5041,6 @@ function flMarkTipHtml(s, mark, agentId, detail) {
   return `<h4>session ${isStart ? 'start' : 'end'}</h4>` +
     (s.title ? `<div class="sub">${escHtml(s.title)}</div>` : '') +
     '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
-}
-
-// flGapAround measures the break on one side of a pause or resume stop: how
-// long the session was left after pausing, or how long it had been left before
-// resuming. It is the width of the undrawn stretch the stop bounds.
-function flGapAround(s, at, isPause) {
-  if (!at) return 0;
-  const active = (s.spans || []).filter(x => x.kind === 'active')
-    .map(x => [new Date(x.from).getTime(), new Date(x.to).getTime()])
-    .sort((a, b) => a[0] - b[0]);
-  for (let i = 0; i < active.length - 1; i++) {
-    const gapStart = active[i][1];
-    const gapEnd = active[i + 1][0];
-    if (isPause && Math.abs(gapStart - at) < 1000) return gapEnd - gapStart;
-    if (!isPause && Math.abs(gapEnd - at) < 1000) return gapEnd - gapStart;
-  }
-  return 0;
 }
 
 function flTipHtml(s, agent) {
@@ -5163,12 +5083,8 @@ function flTipHtml(s, agent) {
       .reduce((t, x) => t + (new Date(x.to) - new Date(x.from)), 0);
     const active = ms('active');
     const idle = ms('idle');
-    const breaks = (s.spans || []).length
-      ? (end - start) - active - idle
-      : 0;
     if (active > 0) rows.push(['working', fmtDur(active)]);
     if (idle > 0) rows.push(['cache cold', fmtDur(idle)]);
-    if (breaks > 60000) rows.push(['away', fmtDur(breaks)]);
   }
   if (agent) {
     if (agent.spawn_depth) rows.push(['depth', agent.spawn_depth]);

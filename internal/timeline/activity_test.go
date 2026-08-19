@@ -37,21 +37,35 @@ func TestCacheColdLullIsBridgedDashed(t *testing.T) {
 	}
 }
 
-func TestLongAbsenceBreaksTheLine(t *testing.T) {
-	// Two hours away: the session was put down and picked back up. The bar
-	// must actually break, not bridge.
+func TestLongAbsenceStillBridgesTheLine(t *testing.T) {
+	// Two hours of silence. The session did not stop existing — a transcript
+	// gap says the context went cold, and only the process can say the session
+	// ended. So the line must stay continuous, bridged cold.
 	stamps := []time.Time{actAt(0), actAt(2), actAt(122), actAt(124)}
 	spans := spansFrom(stamps, actAt(124), false, cold5m)
-	if len(spans) != 2 {
-		t.Fatalf("got %d spans, want 2: %+v", len(spans), spans)
+	if len(spans) != 3 {
+		t.Fatalf("got %d spans, want 3: %+v", len(spans), spans)
 	}
-	for _, s := range spans {
-		if s.Kind != SpanActive {
-			t.Errorf("span %+v should be active; a break is drawn as absence, not as a span", s)
+	if spans[1].Kind != SpanIdle {
+		t.Errorf("the gap must be bridged cold, not broken: %+v", spans)
+	}
+	// Contiguous end to end: no undrawn stretch anywhere.
+	for i := 0; i < len(spans)-1; i++ {
+		if !spans[i].To.Equal(spans[i+1].From) {
+			t.Errorf("spans %d and %d are not contiguous: %+v", i, i+1, spans)
 		}
 	}
-	if !spans[0].To.Equal(actAt(2)) || !spans[1].From.Equal(actAt(122)) {
-		t.Errorf("break is in the wrong place: %+v", spans)
+}
+
+func TestRunningSessionStaysColdIndefinitely(t *testing.T) {
+	// A live session quiet for a day is cold for that whole day — the dotting
+	// runs until something happens or the session ends, with no threshold at
+	// which it gives up and breaks.
+	stamps := []time.Time{actAt(0), actAt(2)}
+	spans := spansFrom(stamps, actAt(1440), true, cold1h)
+	last := spans[len(spans)-1]
+	if last.Kind != SpanIdle || !last.To.Equal(actAt(1440)) {
+		t.Fatalf("cold tail must run to the end: %+v", spans)
 	}
 }
 

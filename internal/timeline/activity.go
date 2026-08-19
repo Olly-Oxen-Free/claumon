@@ -37,16 +37,6 @@ import (
 const (
 	cold5m = 5 * time.Minute
 	cold1h = time.Hour
-
-	// breakAfter is how long a lull must run before the bar breaks outright.
-	// Long enough to be past any pause inside a working session — a meal, a
-	// meeting, the end of a day — so a bar that resumes after one is showing a
-	// genuine return rather than a long think.
-	//
-	// This sits above the longest cache TTL by design: a break is a stronger
-	// claim than a cold cache, so it must not be reachable before the line has
-	// had the chance to go dashed first.
-	breakAfter = 90 * time.Minute
 )
 
 // SpanKind distinguishes a drawn stretch of a session's bar.
@@ -55,14 +45,15 @@ type SpanKind string
 const (
 	// SpanActive is work: events close enough together to read as continuous.
 	SpanActive SpanKind = "active"
-	// SpanIdle is an open session sitting untouched past the cache TTL.
+	// SpanIdle is a session whose context has gone cold: still there, but the
+	// prompt cache has expired. It runs for as long as the quiet does — until
+	// a message arrives, or until the session ends.
 	SpanIdle SpanKind = "idle"
 )
 
-// Span is one drawn stretch of a session's life.
-//
-// Breaks are not spans: they are the absence of one between two spans, which
-// is exactly how they should draw.
+// Span is one drawn stretch of a session's life. Spans tile it end to end
+// without gaps: a session that exists between two events existed for the whole
+// stretch, and the only question is whether its context was warm.
 type Span struct {
 	From time.Time `json:"from"`
 	To   time.Time `json:"to"`
@@ -183,6 +174,16 @@ func nonZeroAfter(b []byte) bool {
 // so stamps are not guaranteed to be sorted; they are walked in order and any
 // stamp that moves backwards is skipped rather than opening a span that ends
 // before it starts.
+// spansFrom reduces ordered event times to a continuous run of spans.
+//
+// The line is never broken. A gap in the transcript means the context went
+// cold, not that the session stopped existing — only the process can say that,
+// and it is not visible from here. So every gap past the cache TTL becomes an
+// idle span, and the line runs unbroken from first event to last.
+//
+// `end` is where the line should stop: for a session whose process is still
+// alive that is now, and the quiet since its last event is drawn cold. For one
+// that has ended it is the last event, and the caller marks the ending.
 func spansFrom(stamps []time.Time, end time.Time, running bool, coldAfter time.Duration) []Span {
 	if len(stamps) == 0 {
 		return nil
@@ -192,43 +193,35 @@ func spansFrom(stamps []time.Time, end time.Time, running bool, coldAfter time.D
 	start := stamps[0]
 	prev := stamps[0]
 
-	flush := func(to time.Time) {
+	flushActive := func(to time.Time) {
 		if to.After(start) {
 			spans = append(spans, Span{From: start, To: to, Kind: SpanActive})
-		} else {
-			// A stretch with one event in it has no width. It is still where
-			// work happened, so it is kept as a zero-length span and the
-			// renderer gives it its minimum width.
-			spans = append(spans, Span{From: start, To: start, Kind: SpanActive})
+			return
 		}
+		// A stretch with one event in it has no width. It is still where work
+		// happened, so it is kept and the renderer gives it a minimum width.
+		spans = append(spans, Span{From: start, To: start, Kind: SpanActive})
 	}
 
 	for _, t := range stamps[1:] {
 		if t.Before(prev) {
 			continue
 		}
-		gap := t.Sub(prev)
-		switch {
-		case gap >= breakAfter:
-			// Long enough that the session was put down: close the stretch and
-			// draw nothing until it resumes.
-			flush(prev)
-			start = t
-		case gap >= coldAfter:
-			// Long enough for the cache to expire but not to call it left:
-			// close the stretch, then bridge the lull dashed so the line stays
-			// continuous while showing it went cold.
-			flush(prev)
+		if t.Sub(prev) >= coldAfter {
+			// The cache expired during this gap: close the warm stretch and
+			// bridge the quiet, so the line stays continuous while showing it
+			// went cold.
+			flushActive(prev)
 			spans = append(spans, Span{From: prev, To: t, Kind: SpanIdle})
 			start = t
 		}
 		prev = t
 	}
-	flush(prev)
+	flushActive(prev)
 
-	// A session still open with nothing happening in it: the tail from its last
-	// event to now is the part a reader most wants marked, because it is the
-	// one they can still act on.
+	// The tail. A running session's quiet since its last event goes cold like
+	// any other, and keeps going until something happens or it ends — which is
+	// why it runs all the way to `end` rather than stopping at some threshold.
 	if running && end.After(prev) && end.Sub(prev) >= coldAfter {
 		spans = append(spans, Span{From: prev, To: end, Kind: SpanIdle})
 	}
