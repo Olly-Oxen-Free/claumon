@@ -1,0 +1,44 @@
+project:
+  name: claumon
+  runtime: go
+  runtime_version: "1.26"
+  framework: null
+
+package_manager: go-modules
+
+commands:
+  build: make build
+  build_full: make build-benchtools
+  lint: go vet ./...
+  test: make test
+  typecheck: null
+
+github:
+  origin: Olly-Oxen-Free/claumon
+  upstream: fabioconcina/claumon
+  default_branch: main
+  pr_target: origin   # this fork, not upstream fabioconcina/claumon
+
+boundaries:
+  never_touch:
+    - "*.lock"
+    - "extension/package-lock.json"
+    - ".env"
+    - ".env.*"
+    - "*.db"
+    - "*.db-journal"
+    - "*.db-wal"
+    - "*.db-shm"
+    - "dist/"
+    - "vendor/"
+    - "internal/forecast/MODEL.pdf"
+    - "internal/forecast/archive/**"
+    - "bench-*.json"
+    - "testdata-bench-*.json"
+  require_review:
+    - "internal/auth/*"
+    - "internal/store/sqlite.go"
+    - ".goreleaser.yml"
+    - ".github/workflows/*"
+    - "extension/package.json"
+    - "extension/src/*"

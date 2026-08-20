@@ -1,0 +1,11 @@
+waves:
+  1: ["1a", "1b", "2a"]
+  2: ["2b"]
+  3: ["3a"]
+  4: ["4a"]
+
+summary:
+  total_waves: 4
+  total_tasks: 6
+  longest_chain: "1a → 2b → 3a → 4a"
+  parallel_capacity: 3
