@@ -732,6 +732,30 @@ tr.clickable { cursor: pointer; }
 }
 .tl-chip-x:hover { color:var(--text-bright); background:var(--bg-hover); }
 
+/* Free-text/tool-name/error-only filter over the event list below. */
+.tl-eventfilter { display:flex; gap:6px; align-items:center; }
+.tl-filter-input {
+  padding:5px 10px;
+  background:var(--bg-surface);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text);
+  font-size:12px;
+  outline:none;
+  width:160px;
+}
+.tl-filter-input:focus { border-color:var(--accent); }
+.tl-filter-input::placeholder { color:var(--text-dim); }
+.tl-filter-tool {
+  padding:5px 8px;
+  background:var(--bg-surface);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text);
+  font-size:12px;
+  outline:none;
+}
+
 .tl-sortdir { display:inline-flex; align-items:center; padding:3px 7px; }
 .tl-arrow { width:12px; height:12px; transition:transform .18s ease; }
 .tl-arrow use { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
@@ -1552,6 +1576,11 @@ tr.clickable { cursor: pointer; }
     <div class="tl-listbar">
       <span class="tl-listtitle">Events</span>
       <span id="tl-filterchip"></span>
+      <div class="tl-eventfilter">
+        <input type="text" id="tl-filter-text" class="tl-filter-input" placeholder="Filter events…" />
+        <select id="tl-filter-tool" class="tl-filter-tool"><option value="">All tools</option></select>
+        <button class="filter-btn" id="tl-filter-errors" title="show only events that errored">Errors only</button>
+      </div>
       <button class="fl-btn tl-sortdir" id="tl-sortdir" title="newest first — click to reverse">
         <svg class="tl-arrow" viewBox="0 0 16 16"><use href="#ic-arrow-down"/></svg>
       </button>
@@ -3710,6 +3739,10 @@ let tlCurrentTimeline = null;
 let tlRefreshTimer = null;
 let flRefreshTimer = null;
 const tlExpanded = new Set();
+// Client-side filter state over the event list — combined as AND in tlApplyFilter.
+let tlFilterText = '';
+let tlFilterTool = '';
+let tlFilterErrorsOnly = false;
 
 function fmtDur(ms) {
   if (!ms) return '';
@@ -3793,6 +3826,7 @@ function tlLoad(sessionId) {
     .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
     .then(tl => {
       tlCurrentTimeline = tl;
+      tlPopulateToolFilter(tl.events);
       tlRenderTotals(tl.totals);
       tlRenderEvents(tl, sessionId);
       tlRenderLive(sessionId);
@@ -3873,13 +3907,47 @@ function tlEventRow(e, sessionId) {
 // waited on, and it should not require a scroll to reach.
 let tlSort = 'desc';
 
+// Narrows events to those matching the free-text/tool-name/error-only state,
+// combined as AND. Free text matches case-insensitively against the fields a
+// person would actually recognize what they typed in.
+function tlApplyFilter(events) {
+  const text = tlFilterText.trim().toLowerCase();
+  return events.filter(e => {
+    if (tlFilterErrorsOnly && !e.is_error) return false;
+    if (tlFilterTool && e.title !== tlFilterTool) return false;
+    if (text) {
+      const hay = [e.title, e.detail, e.full, e.output].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(text)) return false;
+    }
+    return true;
+  });
+}
+
+// Rebuilds the tool-name filter's options from the events actually present in
+// the loaded session, so it never lists a tool this session didn't call.
+// Runs once per session load (not per render) so it doesn't thrash the
+// select's open state on every refresh/sort toggle.
+function tlPopulateToolFilter(events) {
+  const sel = document.getElementById('tl-filter-tool');
+  const tools = [...new Set((events || []).filter(e => e.kind === 'tool').map(e => e.title))].sort();
+  const keep = tools.includes(tlFilterTool) ? tlFilterTool : '';
+  tlFilterTool = keep;
+  sel.innerHTML = '<option value="">All tools</option>' +
+    tools.map(t => `<option value="${escHtml(t)}"${t === keep ? ' selected' : ''}>${escHtml(t)}</option>`).join('');
+}
+
 function tlRenderEvents(tl, sessionId) {
   const list = document.getElementById('tl-list');
   if (!tl.events || !tl.events.length) {
     list.innerHTML = '<div class="tl-empty">That session has no recorded activity.</div>';
     return;
   }
-  const events = tlSort === 'desc' ? tl.events.slice().reverse() : tl.events;
+  let events = tlSort === 'desc' ? tl.events.slice().reverse() : tl.events;
+  events = tlApplyFilter(events);
+  if (!events.length) {
+    list.innerHTML = '<div class="tl-empty">No events match your filter.</div>';
+    return;
+  }
   list.innerHTML = events.map(e => tlEventRow(e, sessionId)).join('');
 }
 
@@ -4036,6 +4104,22 @@ document.getElementById('tl-sortdir').addEventListener('click', () => {
   list.scrollTop = tlSort === 'desc' ? 0 : list.scrollHeight;
   tlSetPausedFlag();
   tlSyncReadMarker();
+});
+
+document.getElementById('tl-filter-text').addEventListener('input', e => {
+  tlFilterText = e.target.value;
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+});
+
+document.getElementById('tl-filter-tool').addEventListener('change', e => {
+  tlFilterTool = e.target.value;
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+});
+
+document.getElementById('tl-filter-errors').addEventListener('click', () => {
+  tlFilterErrorsOnly = !tlFilterErrorsOnly;
+  document.getElementById('tl-filter-errors').classList.toggle('active', tlFilterErrorsOnly);
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
 });
 
 document.getElementById('tl-list').addEventListener('scroll', () => {
