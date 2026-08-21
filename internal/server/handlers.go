@@ -17,6 +17,7 @@ import (
 	"github.com/fabioconcina/claumon/internal/live"
 	"github.com/fabioconcina/claumon/internal/memory"
 	"github.com/fabioconcina/claumon/internal/nimbalyst"
+	"github.com/fabioconcina/claumon/internal/nimble"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
 	"github.com/fabioconcina/claumon/internal/timeline"
@@ -685,6 +686,22 @@ func (h *Handlers) HandleFleet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, fleet)
+}
+
+// HandleNimble lists the NIMBLE PRDs found on disk, grouped by the project
+// directory they live in.
+//
+// claumon has no current repository, so the projects are the ones it has seen
+// sessions run in. A project with no .nimble/ directory simply does not appear:
+// the empty list is the answer for a machine that does not use NIMBLE, not an
+// error.
+func (h *Handlers) HandleNimble(w http.ResponseWriter, r *http.Request) {
+	projects, err := nimble.Discover(h.claudeDir, 500)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"projects": projects})
 }
 
 // HandleHerdrFocus brings a session's terminal pane to the front.

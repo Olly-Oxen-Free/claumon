@@ -125,6 +125,91 @@ func TestFleetReportsAgentsAsSpans(t *testing.T) {
 	}
 }
 
+// writeFleetAgent writes one subagent's transcript and meta into a session's
+// flat subagents/ directory, the same on-disk layout writeAgent uses in
+// timeline_test.go.
+func writeFleetAgent(t *testing.T, claudeDir, sessionID, agentID string, meta agentMeta, lines []map[string]any) {
+	t.Helper()
+	dir := filepath.Join(claudeDir, "projects", "-home-me-proj", sessionID, "subagents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var body []byte
+	for _, l := range lines {
+		b, _ := json.Marshal(l)
+		body = append(append(body, b...), '\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, agentID+".jsonl"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mb, _ := json.Marshal(meta)
+	if err := os.WriteFile(filepath.Join(dir, agentID+".meta.json"), mb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fleetTaskLine is one assistant line making a Task tool_use call, the shape
+// taskToolUseIDs (fleet.go) scans for.
+func fleetTaskLine(ts string, taskID string) map[string]any {
+	return map[string]any{
+		"type": "assistant", "timestamp": ts,
+		"message": map[string]any{"role": "assistant", "model": "claude-sonnet-4-6",
+			"content": []any{map[string]any{"type": "tool_use", "id": taskID, "name": "Task",
+				"input": map[string]any{"description": "go deeper"}}}},
+	}
+}
+
+func TestFleetAgentsNestThreeLevelsDeep(t *testing.T) {
+	start := time.Now().Add(-2 * time.Hour)
+	dir := fleetFixture(t, "sess-a", start, 10)
+
+	// The session's own transcript spawns A.
+	rootPath := filepath.Join(dir, "projects", "-home-me-proj", "sess-a.jsonl")
+	rootBody, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskA, _ := json.Marshal(fleetTaskLine(start.Add(30*time.Second).Format(time.RFC3339), "toolu_A"))
+	if err := os.WriteFile(rootPath, append(rootBody, append(taskA, '\n')...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A's own transcript spawns B; B's own transcript spawns C.
+	writeFleetAgent(t, dir, "sess-a", "agent-aaa",
+		agentMeta{AgentType: "Explore", Description: "level A", ToolUseID: "toolu_A", SpawnDepth: 1},
+		[]map[string]any{fleetTaskLine(start.Add(time.Minute).Format(time.RFC3339), "toolu_B")})
+	writeFleetAgent(t, dir, "sess-a", "agent-bbb",
+		agentMeta{AgentType: "Plan", Description: "level B", ToolUseID: "toolu_B", SpawnDepth: 2},
+		[]map[string]any{fleetTaskLine(start.Add(2*time.Minute).Format(time.RFC3339), "toolu_C")})
+	writeFleetAgent(t, dir, "sess-a", "agent-ccc",
+		agentMeta{AgentType: "Bash", Description: "level C", ToolUseID: "toolu_C", SpawnDepth: 3},
+		[]map[string]any{
+			{"type": "user", "timestamp": start.Add(3 * time.Minute).Format(time.RFC3339),
+				"message": map[string]any{"role": "user", "content": "go"}},
+		})
+
+	f, err := BuildFleet(dir, time.Now().Add(-24*time.Hour), time.Now(), 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := f.Sessions[0].Agents
+	if len(agents) != 1 || agents[0].AgentID != "agent-aaa" {
+		t.Fatalf("top-level agents = %+v, want only A", agents)
+	}
+	a := agents[0]
+	if len(a.Children) != 1 || a.Children[0].AgentID != "agent-bbb" {
+		t.Fatalf("A's children = %+v, want only B", a.Children)
+	}
+	b := a.Children[0]
+	if len(b.Children) != 1 || b.Children[0].AgentID != "agent-ccc" {
+		t.Fatalf("B's children = %+v, want only C", b.Children)
+	}
+	c := b.Children[0]
+	if len(c.Children) != 0 {
+		t.Fatalf("C should have no children of its own: %+v", c.Children)
+	}
+}
+
 func TestFleetSortsNewestFirst(t *testing.T) {
 	dir := fleetFixture(t, "older", time.Now().Add(-5*time.Hour), 5)
 	// A second session in the same project directory, more recent.

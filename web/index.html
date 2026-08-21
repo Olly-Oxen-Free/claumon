@@ -562,6 +562,7 @@ tr.clickable { cursor: pointer; }
 }
 .fl-btn:hover { color:var(--text); }
 .fl-btn.on { background:var(--accent); color:#111; border-color:var(--accent); font-weight:600; }
+.fl-live-btn.paused { color:var(--yellow); border-color:var(--yellow); font-weight:600; }
 .fl-range, .fl-count { font-size:11px; color:var(--text-dim); font-family:ui-monospace,monospace; }
 .fl-count { margin-left:auto; }
 
@@ -732,6 +733,30 @@ tr.clickable { cursor: pointer; }
 }
 .tl-chip-x:hover { color:var(--text-bright); background:var(--bg-hover); }
 
+/* Free-text/tool-name/error-only filter over the event list below. */
+.tl-eventfilter { display:flex; gap:6px; align-items:center; }
+.tl-filter-input {
+  padding:5px 10px;
+  background:var(--bg-surface);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text);
+  font-size:12px;
+  outline:none;
+  width:160px;
+}
+.tl-filter-input:focus { border-color:var(--accent); }
+.tl-filter-input::placeholder { color:var(--text-dim); }
+.tl-filter-tool {
+  padding:5px 8px;
+  background:var(--bg-surface);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text);
+  font-size:12px;
+  outline:none;
+}
+
 .tl-sortdir { display:inline-flex; align-items:center; padding:3px 7px; }
 .tl-arrow { width:12px; height:12px; transition:transform .18s ease; }
 .tl-arrow use { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
@@ -760,6 +785,9 @@ tr.clickable { cursor: pointer; }
 .tl-row.expandable { cursor:pointer; }
 .tl-row.expandable:hover { background:var(--bg-hover); }
 .tl-row.open { background:var(--bg-hover); }
+/* Rows are plain divs, not natively focusable, so keyboard navigation tracks
+   its own indicator instead of relying on :focus. */
+.tl-row.tl-kbd-focus { background:var(--bg-hover); outline:1px solid var(--accent); outline-offset:-1px; }
 .tl-body { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tl-expand { background:var(--bg); border-left:2px solid var(--ev-tool); }
 .tl-expand.d0 { margin-left:0; }
@@ -1314,6 +1342,65 @@ tr.clickable { cursor: pointer; }
 .bar-chart { width: 100%; }
 .bar-label { font-size: 10px; fill: var(--text-dim); }
 .bar-value { font-size: 9px; fill: var(--text-dim); }
+
+/* NIMBLE panel: one section per project, one card per PRD */
+.nimble-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.nimble-title { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.nimble-refresh {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.nimble-refresh:hover { background: var(--bg-hover); color: var(--text-bright); }
+.nimble-project { margin-bottom: 20px; }
+.nimble-project-path {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.nimble-prd { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.nimble-prd-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.nimble-slug { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.nimble-meta { font-size: 11px; color: var(--text-dim); }
+.nimble-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-dim);
+}
+.nimble-status.running, .nimble-status.executing { color: var(--yellow); border-color: var(--yellow); }
+.nimble-status.done, .nimble-status.complete, .nimble-status.merged { color: var(--green); border-color: var(--green); }
+.nimble-status.blocked, .nimble-status.failed { color: var(--red); border-color: var(--red); }
+.nimble-waves { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.nimble-wave { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+.nimble-wave .nimble-wave-num { color: var(--text-bright); font-weight: 600; }
+.nimble-wave.running { border-color: var(--yellow); }
+.nimble-wave.complete { border-color: var(--green); }
+.nimble-wave.blocked { border-color: var(--red); }
+.nimble-alerts { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.nimble-alert { font-size: 11px; display: flex; align-items: baseline; gap: 8px; }
+.nimble-alert-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  padding: 0 5px;
+  flex: none;
+}
+.nimble-alert-kind.stale { color: var(--yellow); border-color: var(--yellow); }
+.nimble-alert-task { color: var(--text-bright); font-family: ui-monospace, monospace; }
+.nimble-alert-title { color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -1381,6 +1468,7 @@ tr.clickable { cursor: pointer; }
   <div class="tab" data-tab="memories">Memories <span id="staleness-badge" class="tab-badge" style="display:none">0</span></div>
   <div class="tab" data-tab="graph">Graph</div>
   <div class="tab" data-tab="timeline">Timeline</div>
+  <div class="tab" data-tab="nimble">NIMBLE</div>
 </div>
 
 <div class="content">
@@ -1552,13 +1640,29 @@ tr.clickable { cursor: pointer; }
     <div class="tl-listbar">
       <span class="tl-listtitle">Events</span>
       <span id="tl-filterchip"></span>
+      <div class="tl-eventfilter">
+        <input type="text" id="tl-filter-text" class="tl-filter-input" placeholder="Filter events…" />
+        <select id="tl-filter-tool" class="tl-filter-tool"><option value="">All tools</option></select>
+        <button class="filter-btn" id="tl-filter-errors" title="show only events that errored">Errors only</button>
+      </div>
       <button class="fl-btn tl-sortdir" id="tl-sortdir" title="newest first — click to reverse">
         <svg class="tl-arrow" viewBox="0 0 16 16"><use href="#ic-arrow-down"/></svg>
       </button>
       <span class="tl-paused" id="tl-paused">paused — scrolled away from the top</span>
     </div>
-    <div class="tl-list" id="tl-list">
+    <div class="tl-list" id="tl-list" tabindex="0">
       <div class="tl-empty">Pick a session to see what it did.</div>
+    </div>
+  </div>
+
+  <!-- NIMBLE Tab: PRD state read straight off disk from .nimble/prds/ -->
+  <div class="tab-content" id="tab-nimble">
+    <div class="nimble-bar">
+      <span class="nimble-title">NIMBLE PRDs</span>
+      <button class="nimble-refresh" id="nimble-refresh">Refresh</button>
+    </div>
+    <div id="nimble-body">
+      <div class="empty-state">Loading...</div>
     </div>
   </div>
 </div>
@@ -1597,6 +1701,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     // Re-render graph when switching to its tab (needs visible width)
     if (tab.dataset.tab === 'graph' && graphData) renderGraphView();
     if (tab.dataset.tab === 'timeline') tlActivate();
+    if (tab.dataset.tab === 'nimble') nimbleActivate();
   });
 });
 
@@ -2241,8 +2346,8 @@ document.addEventListener('keydown', e => {
   // Ignore shortcuts when typing in an input
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  const tabs = ['dashboard', 'memories', 'graph', 'timeline'];
-  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key];
+  const tabs = ['dashboard', 'memories', 'graph', 'timeline', 'nimble'];
+  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 }[e.key];
   if (tabIndex !== undefined) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -2250,6 +2355,7 @@ document.addEventListener('keydown', e => {
     document.getElementById('tab-' + tabs[tabIndex]).classList.add('active');
     if (tabs[tabIndex] === 'graph' && graphData) renderGraphView();
     if (tabs[tabIndex] === 'timeline') tlActivate();
+    if (tabs[tabIndex] === 'nimble') nimbleActivate();
     return;
   }
 
@@ -2264,6 +2370,36 @@ document.addEventListener('keydown', e => {
       document.getElementById('tab-memories').classList.add('active');
     }
     document.getElementById('memory-search').focus();
+    return;
+  }
+
+  if (e.key === 'f') {
+    e.preventDefault();
+    // Switch to Timeline tab if not already there, mirroring '/' above —
+    // a .focus() on an element inside an inactive .tab-content is a no-op.
+    const tlTab = document.querySelector('.tab[data-tab="timeline"]');
+    if (!tlTab.classList.contains('active')) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      tlTab.classList.add('active');
+      document.getElementById('tab-timeline').classList.add('active');
+      tlActivate();
+    }
+    document.getElementById('tl-filter-text').focus();
+    return;
+  }
+
+  // Event-list arrow-key nav only applies while its keyboard cursor is
+  // reachable — i.e. the list has browser focus (tabindex on #tl-list) or
+  // already has a row marked. Elsewhere, ArrowUp/ArrowDown do nothing, so
+  // they don't hijack scrolling on other tabs.
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const list = document.getElementById('tl-list');
+    const within = list.contains(document.activeElement) || list.querySelector('.tl-kbd-focus');
+    if (within) {
+      e.preventDefault();
+      tlKbdFocusMove(e.key === 'ArrowDown' ? 'next' : 'prev');
+    }
   }
 });
 
@@ -3710,6 +3846,10 @@ let tlCurrentTimeline = null;
 let tlRefreshTimer = null;
 let flRefreshTimer = null;
 const tlExpanded = new Set();
+// Client-side filter state over the event list — combined as AND in tlApplyFilter.
+let tlFilterText = '';
+let tlFilterTool = '';
+let tlFilterErrorsOnly = false;
 
 function fmtDur(ms) {
   if (!ms) return '';
@@ -3793,6 +3933,7 @@ function tlLoad(sessionId) {
     .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
     .then(tl => {
       tlCurrentTimeline = tl;
+      tlPopulateToolFilter(tl.events);
       tlRenderTotals(tl.totals);
       tlRenderEvents(tl, sessionId);
       tlRenderLive(sessionId);
@@ -3873,13 +4014,47 @@ function tlEventRow(e, sessionId) {
 // waited on, and it should not require a scroll to reach.
 let tlSort = 'desc';
 
+// Narrows events to those matching the free-text/tool-name/error-only state,
+// combined as AND. Free text matches case-insensitively against the fields a
+// person would actually recognize what they typed in.
+function tlApplyFilter(events) {
+  const text = tlFilterText.trim().toLowerCase();
+  return events.filter(e => {
+    if (tlFilterErrorsOnly && !e.is_error) return false;
+    if (tlFilterTool && e.title !== tlFilterTool) return false;
+    if (text) {
+      const hay = [e.title, e.detail, e.full, e.output].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(text)) return false;
+    }
+    return true;
+  });
+}
+
+// Rebuilds the tool-name filter's options from the events actually present in
+// the loaded session, so it never lists a tool this session didn't call.
+// Runs once per session load (not per render) so it doesn't thrash the
+// select's open state on every refresh/sort toggle.
+function tlPopulateToolFilter(events) {
+  const sel = document.getElementById('tl-filter-tool');
+  const tools = [...new Set((events || []).filter(e => e.kind === 'tool').map(e => e.title))].sort();
+  const keep = tools.includes(tlFilterTool) ? tlFilterTool : '';
+  tlFilterTool = keep;
+  sel.innerHTML = '<option value="">All tools</option>' +
+    tools.map(t => `<option value="${escHtml(t)}"${t === keep ? ' selected' : ''}>${escHtml(t)}</option>`).join('');
+}
+
 function tlRenderEvents(tl, sessionId) {
   const list = document.getElementById('tl-list');
   if (!tl.events || !tl.events.length) {
     list.innerHTML = '<div class="tl-empty">That session has no recorded activity.</div>';
     return;
   }
-  const events = tlSort === 'desc' ? tl.events.slice().reverse() : tl.events;
+  let events = tlSort === 'desc' ? tl.events.slice().reverse() : tl.events;
+  events = tlApplyFilter(events);
+  if (!events.length) {
+    list.innerHTML = '<div class="tl-empty">No events match your filter.</div>';
+    return;
+  }
   list.innerHTML = events.map(e => tlEventRow(e, sessionId)).join('');
 }
 
@@ -3937,6 +4112,10 @@ function tlSetPausedFlag() {
 // Re-reads the selected session and updates the list, unless the reader has
 // scrolled into the history.
 function tlRefresh() {
+  // Separate from tlListPinned() below — that flag means "scrolled away from
+  // the top" and drives its own indicator; this one means "manually paused"
+  // via the gantt's Live/Paused toggle. The two must not be folded together.
+  if (!flLive) return;
   if (!tlSelected || !tlListPinned()) { tlSetPausedFlag(); return; }
   fetch('/api/timeline/' + encodeURIComponent(tlSelected))
     .then(r => (r.ok ? r.json() : null))
@@ -4019,6 +4198,38 @@ document.getElementById('tl-list').addEventListener('click', ev => {
     .catch(() => { box.innerHTML = '<div class="tl-empty">Could not load that agent.</div>'; });
 });
 
+// Moves the keyboard-focus indicator by direction ('next'/'prev') from
+// whichever row currently has it. The class itself is the source of truth
+// (not data-seq, which restarts at 0 inside every expanded subagent's own
+// event list, so it collides across nesting levels and can't identify a
+// row uniquely). Only rows visible in the DOM are reachable, matching what
+// expand/collapse already shows or hides.
+function tlKbdFocusMove(dir) {
+  const rows = [...document.querySelectorAll('#tl-list .tl-row')];
+  if (!rows.length) return;
+  const current = document.querySelector('#tl-list .tl-row.tl-kbd-focus');
+  let idx = current ? rows.indexOf(current) : -1;
+  if (idx === -1) idx = dir === 'prev' ? rows.length - 1 : 0;
+  else if (dir === 'next') idx = Math.min(idx + 1, rows.length - 1);
+  else idx = Math.max(idx - 1, 0);
+  tlKbdFocusSet(rows[idx]);
+  rows[idx].scrollIntoView({ block: 'nearest' });
+}
+
+function tlKbdFocusSet(row) {
+  document.querySelectorAll('#tl-list .tl-row.tl-kbd-focus').forEach(r => r.classList.remove('tl-kbd-focus'));
+  if (row) row.classList.add('tl-kbd-focus');
+}
+
+// Clicking a row also moves the keyboard cursor there, so arrow-key nav
+// continues from wherever the mouse left off instead of jumping back to
+// row 0. A separate listener from the expand/collapse one above, since it
+// reacts to every row rather than only expandable/subagent ones.
+document.getElementById('tl-list').addEventListener('click', ev => {
+  const row = ev.target.closest('.tl-row');
+  if (row) tlKbdFocusSet(row);
+});
+
 document.getElementById('tl-session').addEventListener('change', e => flSelectSession(e.target.value));
 
 // One control, rotated to show which way time runs, instead of two buttons
@@ -4036,6 +4247,22 @@ document.getElementById('tl-sortdir').addEventListener('click', () => {
   list.scrollTop = tlSort === 'desc' ? 0 : list.scrollHeight;
   tlSetPausedFlag();
   tlSyncReadMarker();
+});
+
+document.getElementById('tl-filter-text').addEventListener('input', e => {
+  tlFilterText = e.target.value;
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+});
+
+document.getElementById('tl-filter-tool').addEventListener('change', e => {
+  tlFilterTool = e.target.value;
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+});
+
+document.getElementById('tl-filter-errors').addEventListener('click', () => {
+  tlFilterErrorsOnly = !tlFilterErrorsOnly;
+  document.getElementById('tl-filter-errors').classList.toggle('active', tlFilterErrorsOnly);
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
 });
 
 document.getElementById('tl-list').addEventListener('scroll', () => {
@@ -4118,6 +4345,9 @@ let flWindow = '1d';
 let flEnd = null;            // null means "now", refreshed on each render
 let flData = null;
 let flExpanded = new Set();  // sessions whose agents are shown
+// agent ids whose own children are shown — a flat Set works at any nesting
+// depth because agent_id is globally unique (see safeAgentID).
+let flAgentExpanded = new Set();
 // Set when the view should jump to the right-hand (most recent) edge after
 // the next render. Only ever set from a user action: a scroll that moves on
 // its own while you are reading is worse than one that never moves.
@@ -4140,6 +4370,11 @@ let flFocused = null;
 // is. Off by default — it trades the "what am I looking at" reading for a
 // "where did it go" one, and only one of those can be the default.
 let flHeat = false;
+// When false, the gantt (and the Timeline event list, which the same toggle
+// silences) stops redrawing on SSE pushes or the polling fallback, so a
+// reader can hold a mid-stream view still instead of it reflowing under
+// them. Not persisted — pausing resets to Live on reload, like flWindow.
+let flLive = true;
 
 // A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
 // Orders sessions so children follow the session they were split from, giving
@@ -4390,6 +4625,10 @@ function flRefreshSoon() {
 }
 
 function flRefresh() {
+  // The single choke point for every redraw trigger (SSE sessions/live
+  // pushes via flRefreshSoon, and the 30s polling fallback) — gating here
+  // freezes all of them at once while Paused.
+  if (!flLive) return;
   const scroller = document.querySelector('#tl-graph .fl-scroll');
   if (scroller) flPendingScrollLeft = scroller.scrollLeft;
   flLoad();
@@ -4462,6 +4701,12 @@ function flRender() {
       <button class="fl-btn${flHeat ? ' on' : ''}" data-heat="1" title="colour bars by token burn rate">heat</button>
     </div>
     <div class="fl-pan">
+      <button class="fl-btn fl-live-btn${flLive ? '' : ' paused'}" data-live-toggle="1"
+              title="${flLive ? 'pause redraws to explore freely' : 'resume live redraws'}">
+        ${flLive ? '● Live' : '❚❚ Paused'}
+      </button>
+    </div>
+    <div class="fl-pan">
       <button class="fl-btn" data-zoom="out" title="zoom out (ctrl + scroll)">−</button>
       <button class="fl-btn fl-zoomlabel" data-zoom="reset" title="reset zoom">${flZoom === 1 ? '1×' : (flZoom < 1 ? flZoom.toFixed(2) : flZoom.toFixed(1)) + '×'}</button>
       <button class="fl-btn" data-zoom="in" title="zoom in (ctrl + scroll)">+</button>
@@ -4504,6 +4749,36 @@ function flRender() {
     all.sort((a, b) => a - b);
     peak = all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.9))] : 0;
   }
+
+  // Draws one row per agent, indenting each level and recursing into a
+  // parent's own children when it is itself expanded — mirrors the session
+  // row/agent split just above (push rows into a flat array, skip whatever
+  // isn't open) rather than a nested layout system.
+  const flAgentRows = (sessionId, agents, depth, sel) => {
+    const out = [];
+    for (const a of agents) {
+      const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
+      const children = a.children || [];
+      const kidsOpen = flAgentExpanded.has(a.agent_id);
+      const caret = children.length ? (kidsOpen ? '▾ ' : '▸ ') : '';
+      const indent = 22 + depth * 12;
+      out.push(`<div class="fl-row agent${sel}" data-session="${escHtml(sessionId)}" data-agent="${escHtml(a.agent_id)}" data-children="${children.length}">
+        <div class="fl-label agent" style="padding-left:${indent}px" title="${escHtml(a.description || '')}">
+          <div class="fl-l1"><span class="fl-name">${caret}${escHtml(a.agent_type || 'subagent')}</span></div>
+          ${a.description ? `<div class="fl-l2"><span class="fl-ctx">${escHtml(a.description)}</span></div>` : ''}
+          <span class="fl-grip" title="drag to resize"></span>
+        </div>
+        <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
+          <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
+               data-session="${escHtml(sessionId)}" data-agent="${escHtml(a.agent_id)}"></div>
+        </div>
+      </div>`);
+      if (children.length && kidsOpen) {
+        out.push(...flAgentRows(sessionId, children, depth + 1, sel));
+      }
+    }
+    return out;
+  };
 
   const rows = [];
   const base = flFocused
@@ -4705,20 +4980,7 @@ function flRender() {
     </div>`);
 
     if (!open) continue;
-    for (const a of agents) {
-      const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
-      rows.push(`<div class="fl-row agent${sel}" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
-        <div class="fl-label agent" title="${escHtml(a.description || '')}">
-          <div class="fl-l1"><span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span></div>
-          ${a.description ? `<div class="fl-l2"><span class="fl-ctx">${escHtml(a.description)}</span></div>` : ''}
-          <span class="fl-grip" title="drag to resize"></span>
-        </div>
-        <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
-          <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
-               data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"></div>
-        </div>
-      </div>`);
-    }
+    rows.push(...flAgentRows(s.session_id, agents, 0, sel));
   }
 
   const ruler = `<div class="fl-ruler"><div class="fl-label"><span class="fl-grip" title="drag to resize"></span></div>` +
@@ -4815,6 +5077,18 @@ function flBindControls(host) {
     //
     // Turning heat off needs nothing new, so it just redraws.
     if (flHeat) flLoad(); else flRender();
+  });
+
+  const liveToggle = host.querySelector('.fl-btn[data-live-toggle]');
+  if (liveToggle) liveToggle.addEventListener('click', () => {
+    const scroller = host.querySelector('.fl-scroll');
+    if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+    flLive = !flLive;
+    // Pausing renders from data already in hand — nothing to fetch. Resuming
+    // forces an immediate refetch (not the coalesced flRefreshSoon) since this
+    // is a direct user action, and catches up the event list too, since the
+    // same flag silences tlRefresh() as a side effect of pausing the gantt.
+    if (flLive) { flLoad(); tlRefresh(); } else { flRender(); }
   });
 
   const clear = host.querySelector('.fl-btn[data-clear]');
@@ -4954,8 +5228,17 @@ function flBindRows(host) {
   host.querySelectorAll('.fl-label').forEach(el => {
     const row = el.closest('.fl-row');
     el.addEventListener('click', () => {
-      // A session label toggles its agents; an agent label opens that agent.
+      // A session label toggles its agents. An agent label with its own
+      // children toggles those instead of opening the agent — the same
+      // expand-not-open split the session row uses; an agent with no
+      // children keeps opening it, unchanged from before nesting existed.
       if (row.classList.contains('agent')) {
+        if (Number(row.dataset.children || 0) > 0) {
+          const aid = row.dataset.agent;
+          if (flAgentExpanded.has(aid)) flAgentExpanded.delete(aid); else flAgentExpanded.add(aid);
+          flRender();
+          return;
+        }
         flOpenAgent(row.dataset.session, row.dataset.agent);
         return;
       }
@@ -4980,7 +5263,7 @@ function flBindRows(host) {
     el.addEventListener('mouseenter', ev => {
       const s = flData.sessions.find(x => x.session_id === el.dataset.session);
       if (!s) return;
-      const a = el.dataset.agent && (s.agents || []).find(y => y.agent_id === el.dataset.agent);
+      const a = el.dataset.agent && flFindAgent(s.agents || [], el.dataset.agent);
       tip.innerHTML = flTipHtml(s, a || null);
       tip.style.display = 'block';
       flTipAnchor = el;
@@ -5049,6 +5332,20 @@ function flPlaceTip(ev) {
   if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
   tip.style.left = Math.max(4, x) + 'px';
   tip.style.top = Math.max(4, y) + 'px';
+}
+
+// flFindAgent looks up an agent by id anywhere in its session's nested
+// tree — a bar for a depth 2+ agent needs this, since s.agents only lists
+// the top level.
+function flFindAgent(agents, agentId) {
+  for (const a of agents) {
+    if (a.agent_id === agentId) return a;
+    if (a.children && a.children.length) {
+      const found = flFindAgent(a.children, agentId);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 // Describes one marked moment.
@@ -5183,6 +5480,78 @@ window.addEventListener('resize', () => {
   clearTimeout(flResizeTimer);
   flResizeTimer = setTimeout(flRender, 150);
 });
+
+
+// --- NIMBLE panel ---------------------------------------------------------
+// NIMBLE keeps its whole view of a PRD run in files under .nimble/prds/, and
+// its own dashboard command re-reads them on every invocation. There is no
+// stream to subscribe to, so this loads when the tab is opened and whenever
+// the reader asks again.
+let nimbleLoaded = false;
+
+function nimbleActivate() {
+  if (nimbleLoaded) return;
+  nimbleLoaded = true;
+  nimbleLoad();
+}
+
+function nimbleLoad() {
+  fetch('/api/nimble/prds')
+    .then(r => r.json())
+    .then(nimbleRender)
+    .catch(() => {
+      document.getElementById('nimble-body').innerHTML =
+        '<div class="empty-state">Could not read NIMBLE state.</div>';
+    });
+}
+
+function nimbleRender(data) {
+  const projects = (data && data.projects) || [];
+  const body = document.getElementById('nimble-body');
+  if (!projects.length) {
+    body.innerHTML = '<div class="empty-state">No NIMBLE PRDs found</div>';
+    return;
+  }
+  body.innerHTML = projects.map(p => `
+    <div class="nimble-project">
+      <div class="nimble-project-path">${escHtml(p.path)}</div>
+      ${(p.prds || []).map(nimblePrd).join('')}
+    </div>`).join('');
+}
+
+function nimblePrd(prd) {
+  const waves = (prd.waves || []).map(w => `
+    <span class="nimble-wave ${nimbleClass(w.status)}">
+      <span class="nimble-wave-num">Wave ${w.number}</span> ${w.done}/${w.tasks} · ${escHtml(w.status)}
+    </span>`).join('');
+  const alerts = (prd.alerts || []).map(a => `
+    <div class="nimble-alert">
+      <span class="nimble-alert-kind ${nimbleClass(a.kind)}">${escHtml(a.kind)}</span>
+      <span class="nimble-alert-task">${escHtml(a.task_id)}</span>
+      <span class="nimble-alert-title">${escHtml(a.title || a.status)}</span>
+    </div>`).join('');
+  const meta = [
+    prd.task_count ? prd.task_count + ' tasks' : '',
+    prd.execution_mode || '',
+    prd.feature_branch || ''
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="nimble-prd">
+      <div class="nimble-prd-head">
+        <span class="nimble-slug">${escHtml(prd.prd_slug)}</span>
+        <span class="nimble-status ${nimbleClass(prd.status)}">${escHtml(prd.status)}</span>
+        <span class="nimble-meta">${escHtml(meta)}</span>
+      </div>
+      ${waves ? `<div class="nimble-waves">${waves}</div>` : ''}
+      ${alerts ? `<div class="nimble-alerts">${alerts}</div>` : ''}
+    </div>`;
+}
+
+// Status words come from NIMBLE's own vocabulary, which may grow; keep only
+// what is safe to drop into a class attribute.
+function nimbleClass(s) { return String(s || '').toLowerCase().replace(/[^a-z-]/g, ''); }
+
+document.getElementById('nimble-refresh').addEventListener('click', nimbleLoad);
 
 
 </script>

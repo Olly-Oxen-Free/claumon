@@ -236,13 +236,19 @@ func BuildAgent(claudeDir, sessionID, agentID string) (*Timeline, error) {
 	if !safeAgentID(agentID) {
 		return nil, os.ErrNotExist
 	}
-	agentPath := filepath.Join(sessionDir(path, sessionID), "subagents", agentID+".jsonl")
+	sessDir := sessionDir(path, sessionID)
+	agentPath := filepath.Join(sessDir, "subagents", agentID+".jsonl")
 	tl, err := buildFromFile(agentPath, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	tl.AgentID = agentID
 	tl.Project = projectName(filepath.Dir(path))
+	// This agent's own subagents live in the same flat session-wide
+	// subagents/ directory as everything else — not a directory nested under
+	// its own path — so this resolves its Task calls exactly as attachAgents
+	// does for the root, rooted here instead.
+	foldSubagents(tl, sessDir, agentID, false)
 	return tl, nil
 }
 
@@ -438,112 +444,192 @@ func closeResults(tl *Timeline, pending map[string]int, blocks []contentBlock, a
 }
 
 // attachAgents folds each spawned subagent into the Task event that spawned
-// it. An agent whose parent Task call is missing from the transcript is
-// appended at its own start time rather than dropped.
+// it, nesting a subagent's own subagents beneath it in turn. An agent whose
+// parent Task call is missing from the transcript is appended at its own
+// start time rather than dropped.
 func attachAgents(tl *Timeline, sessDir string) {
+	foldSubagents(tl, sessDir, "", true)
+}
+
+// foldSubagents is the shared implementation behind attachAgents (rooted at
+// a session) and BuildAgent (rooted at one agent's own transcript). All of a
+// session's agents, at every spawn depth, live flat in the one
+// sessDir/subagents directory — see the package doc comment — so both
+// callers read the same directory and share the same pool.
+//
+// excludeID leaves one agent out of the pool: BuildAgent builds tl from that
+// agent's own file, and it must not be able to match itself.
+//
+// withLeftovers runs the "never drop a spawned agent" fallback (an agent
+// whose toolUseId never matched anywhere gets pinned onto tl regardless).
+// That guarantee is about the session as a whole, not about whichever
+// agent happens to be the current recursion root — so only attachAgents
+// (the true session root) sets this. Without it, every unrelated
+// leftover agent in the session would land under every single expanded
+// agent's own view via BuildAgent instead of once, at the root.
+func foldSubagents(tl *Timeline, sessDir, excludeID string, withLeftovers bool) {
+	agents := discoverAgents(sessDir, tl.SessionID, excludeID)
+	if len(agents) == 0 {
+		return
+	}
+	pool := newAgentPool(agents)
+	foldChildren(tl, pool)
+	if withLeftovers {
+		attachLeftovers(tl, pool)
+	}
+	sort.SliceStable(tl.Events, func(i, j int) bool { return tl.Events[i].At.Before(tl.Events[j].At) })
+	finalize(tl)
+}
+
+// foundAgent is one subagent read off disk, still unattached to any tree.
+type foundAgent struct {
+	agentID string
+	meta    agentMeta
+	sub     *Timeline
+}
+
+// discoverAgents reads every subagent transcript in a session's flat
+// subagents/ directory, regardless of spawn depth — a depth-2 agent's file
+// sits in exactly the same directory as a depth-1 one.
+func discoverAgents(sessDir, sessionID, excludeID string) []*foundAgent {
 	dir := filepath.Join(sessDir, "subagents")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return nil
 	}
-
-	// Each agent's meta names the tool_use id of the Task call that spawned
-	// it, so pairing is exact rather than positional. Unpaired Task calls are
-	// kept for the fallback below, which covers an agent whose meta file is
-	// missing or predates that field.
-	byToolUse := map[string]int{}
-	var unpairedTasks []int
-	for i, ev := range tl.Events {
-		if ev.Kind != KindTool || ev.Title != "Task" {
-			continue
-		}
-		if ev.toolUseID != "" {
-			byToolUse[ev.toolUseID] = i
-		}
-		unpairedTasks = append(unpairedTasks, i)
-	}
-
-	type found struct {
-		ref   AgentRef
-		start time.Time
-		meta  agentMeta
-	}
-	var agents []found
-
+	var agents []*foundAgent
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".jsonl") {
 			continue
 		}
 		agentID := strings.TrimSuffix(name, ".jsonl")
+		if agentID == excludeID {
+			continue
+		}
 		meta := readMeta(filepath.Join(dir, agentID+".meta.json"))
-
-		sub, err := buildFromFile(filepath.Join(dir, name), tl.SessionID)
+		sub, err := buildFromFile(filepath.Join(dir, name), sessionID)
 		if err != nil {
 			continue
 		}
-		ref := AgentRef{
-			AgentID:     agentID,
-			AgentType:   meta.AgentType,
-			Description: meta.Description,
-			Model:       sub.Model,
-			SpawnDepth:  meta.SpawnDepth,
-			StartedAt:   sub.StartedAt,
-			EndedAt:     sub.EndedAt,
-			Events:      sub.Totals.Events,
-			ToolCalls:   sub.Totals.ToolCalls,
-			CostUSD:     sub.Totals.CostUSD,
-		}
-		if !sub.StartedAt.IsZero() && sub.EndedAt.After(sub.StartedAt) {
-			ref.DurationMS = sub.EndedAt.Sub(sub.StartedAt).Milliseconds()
-		}
-		agents = append(agents, found{ref: ref, start: sub.StartedAt, meta: meta})
+		agents = append(agents, &foundAgent{agentID: agentID, meta: meta, sub: sub})
 	}
+	return agents
+}
 
-	// Oldest first, so agents pair with Task calls in the order both happened.
-	sort.SliceStable(agents, func(i, j int) bool { return agents[i].start.Before(agents[j].start) })
+// agentPool is a session-wide toolUseId -> agent pool. A tool-use id can
+// only be claimed once anywhere in the tree, so matching drains it: this
+// makes the depth-first fold below terminate and rules out double-attaching
+// an agent or looping.
+type agentPool struct {
+	byToolUse map[string]*foundAgent
+	byID      map[string]*foundAgent
+}
 
-	fold := func(idx int, a found) {
-		ev := &tl.Events[idx]
-		ev.Kind = KindSubagent
-		ref := a.ref
-		ev.Agent = &ref
-		if ref.AgentType != "" {
-			ev.Title = ref.AgentType
-		}
-		if ref.Description != "" {
-			ev.Detail = ref.Description
-		}
-		if ev.DurationMS == 0 {
-			ev.DurationMS = ref.DurationMS
-		}
-	}
-
-	var leftover []found
+func newAgentPool(agents []*foundAgent) *agentPool {
+	p := &agentPool{byToolUse: map[string]*foundAgent{}, byID: map[string]*foundAgent{}}
 	for _, a := range agents {
-		idx, ok := byToolUse[a.meta.ToolUseID]
-		if a.meta.ToolUseID == "" || !ok {
-			leftover = append(leftover, a)
-			continue
+		p.byID[a.agentID] = a
+		if a.meta.ToolUseID != "" {
+			p.byToolUse[a.meta.ToolUseID] = a
 		}
-		fold(idx, a)
-		delete(byToolUse, a.meta.ToolUseID)
-		unpairedTasks = removeIndex(unpairedTasks, idx)
 	}
+	return p
+}
 
-	// Fallback for agents with no usable toolUseId: pair with whatever Task
-	// calls are left, oldest first, then append anything still unmatched so a
-	// spawned agent is never silently dropped from the timeline.
-	for _, a := range leftover {
-		if len(unpairedTasks) > 0 {
-			fold(unpairedTasks[0], a)
-			unpairedTasks = unpairedTasks[1:]
+// take claims the agent whose meta names toolUseID as its spawning call.
+func (p *agentPool) take(toolUseID string) (*foundAgent, bool) {
+	a, ok := p.byToolUse[toolUseID]
+	if !ok {
+		return nil, false
+	}
+	delete(p.byToolUse, toolUseID)
+	delete(p.byID, a.agentID)
+	return a, true
+}
+
+// takeByID claims an agent by its own id, used by the leftover fallback
+// below. Returns false if the agent was already claimed as someone's child
+// while an earlier leftover's own subtree was folded.
+func (p *agentPool) takeByID(agentID string) (*foundAgent, bool) {
+	a, ok := p.byID[agentID]
+	if !ok {
+		return nil, false
+	}
+	delete(p.byID, agentID)
+	if a.meta.ToolUseID != "" {
+		delete(p.byToolUse, a.meta.ToolUseID)
+	}
+	return a, true
+}
+
+// remainingOldestFirst names every agent still unclaimed, oldest start
+// first — the order the leftover fallback pairs and appends in.
+func (p *agentPool) remainingOldestFirst() []string {
+	ids := make([]string, 0, len(p.byID))
+	for id := range p.byID {
+		ids = append(ids, id)
+	}
+	sort.SliceStable(ids, func(i, j int) bool {
+		return p.byID[ids[i]].sub.StartedAt.Before(p.byID[ids[j]].sub.StartedAt)
+	})
+	return ids
+}
+
+// foldChildren matches tl's own Task calls against the shared pool. Each
+// resolved agent is recursed into — matching its own Task calls against the
+// same, now-smaller pool — and finalized before tl's own event is built, so
+// a grandchild's cost and tool-call totals roll up through finalize (see
+// its doc comment) before the parent's AgentRef reads them. This is what
+// makes rollup work through arbitrarily many levels with no separate
+// rollup code.
+func foldChildren(tl *Timeline, pool *agentPool) {
+	for i := range tl.Events {
+		ev := &tl.Events[i]
+		if ev.Kind != KindTool || ev.Title != "Task" || ev.toolUseID == "" {
 			continue
 		}
-		ref := a.ref
+		a, ok := pool.take(ev.toolUseID)
+		if !ok {
+			continue
+		}
+		foldChildren(a.sub, pool)
+		finalize(a.sub)
+		foldEvent(ev, buildAgentRef(a))
+	}
+}
+
+// attachLeftovers places every agent whose toolUseId never matched a Task
+// call anywhere in the tree: a stale/missing meta file, not a genuine child
+// of something already resolved. It pairs each with whatever root Task call
+// is still unclaimed, oldest first, then appends anything left as an orphan
+// so a spawned agent is never silently dropped. An agent claimed as someone
+// else's child while an earlier leftover's own subtree was folded is
+// skipped — it already has a home.
+func attachLeftovers(tl *Timeline, pool *agentPool) {
+	order := pool.remainingOldestFirst()
+	var unpaired []int
+	for i, ev := range tl.Events {
+		if ev.Kind == KindTool && ev.Title == "Task" {
+			unpaired = append(unpaired, i)
+		}
+	}
+	for _, agentID := range order {
+		a, ok := pool.takeByID(agentID)
+		if !ok {
+			continue
+		}
+		foldChildren(a.sub, pool)
+		finalize(a.sub)
+		ref := buildAgentRef(a)
+		if len(unpaired) > 0 {
+			foldEvent(&tl.Events[unpaired[0]], ref)
+			unpaired = unpaired[1:]
+			continue
+		}
 		tl.Events = append(tl.Events, Event{
 			Kind:       KindSubagent,
-			At:         a.start,
+			At:         a.sub.StartedAt,
 			Title:      firstNonEmpty(ref.AgentType, "subagent"),
 			Detail:     ref.Description,
 			DurationMS: ref.DurationMS,
@@ -551,18 +637,45 @@ func attachAgents(tl *Timeline, sessDir string) {
 			Agent:      &ref,
 		})
 	}
-
-	sort.SliceStable(tl.Events, func(i, j int) bool { return tl.Events[i].At.Before(tl.Events[j].At) })
-	finalize(tl)
 }
 
-func removeIndex(xs []int, v int) []int {
-	for i, x := range xs {
-		if x == v {
-			return append(xs[:i], xs[i+1:]...)
-		}
+// buildAgentRef summarises a resolved agent. Called after the agent's own
+// children have been folded and finalized, so Events/ToolCalls/CostUSD
+// already include whatever it spawned in turn.
+func buildAgentRef(a *foundAgent) AgentRef {
+	sub := a.sub
+	ref := AgentRef{
+		AgentID:     a.agentID,
+		AgentType:   a.meta.AgentType,
+		Description: a.meta.Description,
+		Model:       sub.Model,
+		SpawnDepth:  a.meta.SpawnDepth,
+		StartedAt:   sub.StartedAt,
+		EndedAt:     sub.EndedAt,
+		Events:      sub.Totals.Events,
+		ToolCalls:   sub.Totals.ToolCalls,
+		CostUSD:     sub.Totals.CostUSD,
 	}
-	return xs
+	if !sub.StartedAt.IsZero() && sub.EndedAt.After(sub.StartedAt) {
+		ref.DurationMS = sub.EndedAt.Sub(sub.StartedAt).Milliseconds()
+	}
+	return ref
+}
+
+// foldEvent turns a Task tool call into the subagent event it spawned.
+func foldEvent(ev *Event, ref AgentRef) {
+	ev.Kind = KindSubagent
+	r := ref
+	ev.Agent = &r
+	if r.AgentType != "" {
+		ev.Title = r.AgentType
+	}
+	if r.Description != "" {
+		ev.Detail = r.Description
+	}
+	if ev.DurationMS == 0 {
+		ev.DurationMS = r.DurationMS
+	}
 }
 
 func readMeta(path string) agentMeta {

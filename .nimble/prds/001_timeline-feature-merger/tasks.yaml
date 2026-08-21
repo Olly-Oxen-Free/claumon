@@ -63,9 +63,15 @@ tasks:
   - id: "2a"
     title: "Recursive subagent hierarchy — Go parsing"
     description: >
-      internal/timeline/timeline.go's BuildAgent never calls attachAgents
-      recursively, so a subagent's own subagent is parsed as an inert Task row
-      instead of a nested agent. Fix BuildAgent to recurse to arbitrary depth.
+      internal/timeline/timeline.go's BuildAgent never calls attachAgents at
+      all (Build does, BuildAgent doesn't), and attachAgents only matches
+      toolUseId against the root session's own events — so a depth-2+
+      subagent's toolUseId, which lives in a depth-1 agent's own transcript,
+      is never found there and gets actively misattributed to an unrelated
+      root-level Task row or appended as a root orphan. This is live data
+      misattribution on already-shipped sessions, not just a missing feature.
+      Fix by building a session-wide toolUseId → agent pool matched
+      depth-first/bottom-up, so nesting works to arbitrary depth.
       AgentRef.SpawnDepth (timeline.go:113,:490) is already parsed and may cover part
       of the depth-tracking need — reuse it rather than re-deriving depth. Add a
       children field to FleetAgent (fleet.go:158-159, currently flat) and to
