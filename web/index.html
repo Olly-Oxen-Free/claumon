@@ -4275,6 +4275,9 @@ let flWindow = '1d';
 let flEnd = null;            // null means "now", refreshed on each render
 let flData = null;
 let flExpanded = new Set();  // sessions whose agents are shown
+// agent ids whose own children are shown — a flat Set works at any nesting
+// depth because agent_id is globally unique (see safeAgentID).
+let flAgentExpanded = new Set();
 // Set when the view should jump to the right-hand (most recent) edge after
 // the next render. Only ever set from a user action: a scroll that moves on
 // its own while you are reading is worse than one that never moves.
@@ -4662,6 +4665,36 @@ function flRender() {
     peak = all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.9))] : 0;
   }
 
+  // Draws one row per agent, indenting each level and recursing into a
+  // parent's own children when it is itself expanded — mirrors the session
+  // row/agent split just above (push rows into a flat array, skip whatever
+  // isn't open) rather than a nested layout system.
+  const flAgentRows = (sessionId, agents, depth, sel) => {
+    const out = [];
+    for (const a of agents) {
+      const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
+      const children = a.children || [];
+      const kidsOpen = flAgentExpanded.has(a.agent_id);
+      const caret = children.length ? (kidsOpen ? '▾ ' : '▸ ') : '';
+      const indent = 22 + depth * 12;
+      out.push(`<div class="fl-row agent${sel}" data-session="${escHtml(sessionId)}" data-agent="${escHtml(a.agent_id)}" data-children="${children.length}">
+        <div class="fl-label agent" style="padding-left:${indent}px" title="${escHtml(a.description || '')}">
+          <div class="fl-l1"><span class="fl-name">${caret}${escHtml(a.agent_type || 'subagent')}</span></div>
+          ${a.description ? `<div class="fl-l2"><span class="fl-ctx">${escHtml(a.description)}</span></div>` : ''}
+          <span class="fl-grip" title="drag to resize"></span>
+        </div>
+        <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
+          <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
+               data-session="${escHtml(sessionId)}" data-agent="${escHtml(a.agent_id)}"></div>
+        </div>
+      </div>`);
+      if (children.length && kidsOpen) {
+        out.push(...flAgentRows(sessionId, children, depth + 1, sel));
+      }
+    }
+    return out;
+  };
+
   const rows = [];
   const base = flFocused
     ? flData.sessions.filter(s => s.session_id === flFocused)
@@ -4862,20 +4895,7 @@ function flRender() {
     </div>`);
 
     if (!open) continue;
-    for (const a of agents) {
-      const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
-      rows.push(`<div class="fl-row agent${sel}" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
-        <div class="fl-label agent" title="${escHtml(a.description || '')}">
-          <div class="fl-l1"><span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span></div>
-          ${a.description ? `<div class="fl-l2"><span class="fl-ctx">${escHtml(a.description)}</span></div>` : ''}
-          <span class="fl-grip" title="drag to resize"></span>
-        </div>
-        <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
-          <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
-               data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"></div>
-        </div>
-      </div>`);
-    }
+    rows.push(...flAgentRows(s.session_id, agents, 0, sel));
   }
 
   const ruler = `<div class="fl-ruler"><div class="fl-label"><span class="fl-grip" title="drag to resize"></span></div>` +
@@ -5111,8 +5131,17 @@ function flBindRows(host) {
   host.querySelectorAll('.fl-label').forEach(el => {
     const row = el.closest('.fl-row');
     el.addEventListener('click', () => {
-      // A session label toggles its agents; an agent label opens that agent.
+      // A session label toggles its agents. An agent label with its own
+      // children toggles those instead of opening the agent — the same
+      // expand-not-open split the session row uses; an agent with no
+      // children keeps opening it, unchanged from before nesting existed.
       if (row.classList.contains('agent')) {
+        if (Number(row.dataset.children || 0) > 0) {
+          const aid = row.dataset.agent;
+          if (flAgentExpanded.has(aid)) flAgentExpanded.delete(aid); else flAgentExpanded.add(aid);
+          flRender();
+          return;
+        }
         flOpenAgent(row.dataset.session, row.dataset.agent);
         return;
       }
@@ -5137,7 +5166,7 @@ function flBindRows(host) {
     el.addEventListener('mouseenter', ev => {
       const s = flData.sessions.find(x => x.session_id === el.dataset.session);
       if (!s) return;
-      const a = el.dataset.agent && (s.agents || []).find(y => y.agent_id === el.dataset.agent);
+      const a = el.dataset.agent && flFindAgent(s.agents || [], el.dataset.agent);
       tip.innerHTML = flTipHtml(s, a || null);
       tip.style.display = 'block';
       flTipAnchor = el;
@@ -5206,6 +5235,20 @@ function flPlaceTip(ev) {
   if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
   tip.style.left = Math.max(4, x) + 'px';
   tip.style.top = Math.max(4, y) + 'px';
+}
+
+// flFindAgent looks up an agent by id anywhere in its session's nested
+// tree — a bar for a depth 2+ agent needs this, since s.agents only lists
+// the top level.
+function flFindAgent(agents, agentId) {
+  for (const a of agents) {
+    if (a.agent_id === agentId) return a;
+    if (a.children && a.children.length) {
+      const found = flFindAgent(a.children, agentId);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 // Describes one marked moment.
