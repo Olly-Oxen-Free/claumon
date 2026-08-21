@@ -562,6 +562,7 @@ tr.clickable { cursor: pointer; }
 }
 .fl-btn:hover { color:var(--text); }
 .fl-btn.on { background:var(--accent); color:#111; border-color:var(--accent); font-weight:600; }
+.fl-live-btn.paused { color:var(--yellow); border-color:var(--yellow); font-weight:600; }
 .fl-range, .fl-count { font-size:11px; color:var(--text-dim); font-family:ui-monospace,monospace; }
 .fl-count { margin-left:auto; }
 
@@ -4078,6 +4079,10 @@ function tlSetPausedFlag() {
 // Re-reads the selected session and updates the list, unless the reader has
 // scrolled into the history.
 function tlRefresh() {
+  // Separate from tlListPinned() below — that flag means "scrolled away from
+  // the top" and drives its own indicator; this one means "manually paused"
+  // via the gantt's Live/Paused toggle. The two must not be folded together.
+  if (!flLive) return;
   if (!tlSelected || !tlListPinned()) { tlSetPausedFlag(); return; }
   fetch('/api/timeline/' + encodeURIComponent(tlSelected))
     .then(r => (r.ok ? r.json() : null))
@@ -4300,6 +4305,11 @@ let flFocused = null;
 // is. Off by default — it trades the "what am I looking at" reading for a
 // "where did it go" one, and only one of those can be the default.
 let flHeat = false;
+// When false, the gantt (and the Timeline event list, which the same toggle
+// silences) stops redrawing on SSE pushes or the polling fallback, so a
+// reader can hold a mid-stream view still instead of it reflowing under
+// them. Not persisted — pausing resets to Live on reload, like flWindow.
+let flLive = true;
 
 // A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
 // Orders sessions so children follow the session they were split from, giving
@@ -4550,6 +4560,10 @@ function flRefreshSoon() {
 }
 
 function flRefresh() {
+  // The single choke point for every redraw trigger (SSE sessions/live
+  // pushes via flRefreshSoon, and the 30s polling fallback) — gating here
+  // freezes all of them at once while Paused.
+  if (!flLive) return;
   const scroller = document.querySelector('#tl-graph .fl-scroll');
   if (scroller) flPendingScrollLeft = scroller.scrollLeft;
   flLoad();
@@ -4620,6 +4634,12 @@ function flRender() {
     </div>
     <div class="fl-pan">
       <button class="fl-btn${flHeat ? ' on' : ''}" data-heat="1" title="colour bars by token burn rate">heat</button>
+    </div>
+    <div class="fl-pan">
+      <button class="fl-btn fl-live-btn${flLive ? '' : ' paused'}" data-live-toggle="1"
+              title="${flLive ? 'pause redraws to explore freely' : 'resume live redraws'}">
+        ${flLive ? '● Live' : '❚❚ Paused'}
+      </button>
     </div>
     <div class="fl-pan">
       <button class="fl-btn" data-zoom="out" title="zoom out (ctrl + scroll)">−</button>
@@ -4992,6 +5012,18 @@ function flBindControls(host) {
     //
     // Turning heat off needs nothing new, so it just redraws.
     if (flHeat) flLoad(); else flRender();
+  });
+
+  const liveToggle = host.querySelector('.fl-btn[data-live-toggle]');
+  if (liveToggle) liveToggle.addEventListener('click', () => {
+    const scroller = host.querySelector('.fl-scroll');
+    if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+    flLive = !flLive;
+    // Pausing renders from data already in hand — nothing to fetch. Resuming
+    // forces an immediate refetch (not the coalesced flRefreshSoon) since this
+    // is a direct user action, and catches up the event list too, since the
+    // same flag silences tlRefresh() as a side effect of pausing the gantt.
+    if (flLive) { flLoad(); tlRefresh(); } else { flRender(); }
   });
 
   const clear = host.querySelector('.fl-btn[data-clear]');
