@@ -1,10 +1,13 @@
 {
   "prd_slug": "timeline-feature-merger",
   "version": "5.0",
-  "status": "ready",
+  "status": "ready-for-merge",
   "execution_mode": "feature-branch",
   "feature_branch": "feature/timeline-feature-merger",
   "created_at": "2026-08-20T00:00:00Z",
+  "started_at": "2026-08-21T00:31:00Z",
+  "completed_at": "2026-08-21T02:34:00Z",
+  "ready_for_merge_at": "2026-08-21T02:34:00Z",
   "tracker": {
     "issue_key": null,
     "item_id": "plan_1787266927737_stpt6i",
@@ -12,5 +15,84 @@
     "created_at": "2026-08-20T23:02:09Z",
     "escalations": []
   },
-  "tasks": {}
+  "waves": {
+    "1": { "status": "complete" },
+    "2": { "status": "complete" },
+    "3": { "status": "complete" },
+    "4": { "status": "complete" }
+  },
+  "tasks": {
+    "1a": {
+      "status": "done",
+      "wave": 1,
+      "branch": "worktree/timeline-feature-merger-1a",
+      "pr_number": 2,
+      "pr_target": "feature/timeline-feature-merger",
+      "pr_labels": ["nimble", "wave-1"],
+      "model": "sonnet",
+      "loops": 1,
+      "started_at": "2026-08-21T00:32:00Z",
+      "completed_at": "2026-08-21T00:44:00Z",
+      "merged_at": "2026-08-21T00:45:00Z"
+    },
+    "1b": {
+      "status": "done",
+      "wave": 1,
+      "branch": "worktree/timeline-feature-merger-1b",
+      "pr_number": 3,
+      "pr_target": "feature/timeline-feature-merger",
+      "pr_labels": ["nimble", "wave-1"],
+      "model": "opus",
+      "loops": 1,
+      "started_at": "2026-08-21T00:32:00Z",
+      "completed_at": "2026-08-21T01:04:00Z",
+      "merged_at": "2026-08-21T01:05:00Z"
+    },
+    "2a": {
+      "status": "done",
+      "wave": 1,
+      "branch": "worktree/timeline-feature-merger-2a",
+      "pr_number": 4,
+      "pr_target": "feature/timeline-feature-merger",
+      "pr_labels": ["nimble", "wave-1"],
+      "model": "sonnet",
+      "loops": 1,
+      "started_at": "2026-08-21T01:00:00Z",
+      "completed_at": "2026-08-21T01:22:00Z",
+      "merged_at": "2026-08-21T01:23:00Z"
+    },
+    "2b": {
+      "status": "done",
+      "wave": 2,
+      "branch": "worktree/timeline-feature-merger-2b",
+      "pr_number": 5,
+      "pr_target": "feature/timeline-feature-merger",
+      "pr_labels": ["nimble", "wave-2"],
+      "model": "sonnet",
+      "loops": 1,
+      "started_at": "2026-08-21T01:24:00Z",
+      "completed_at": "2026-08-21T01:55:00Z",
+      "merged_at": "2026-08-21T01:56:00Z"
+    },
+    "3a": {
+      "status": "done",
+      "wave": 3,
+      "branch": "feature/timeline-feature-merger",
+      "model": "sonnet",
+      "loops": 1,
+      "started_at": "2026-08-21T01:57:00Z",
+      "completed_at": "2026-08-21T02:15:00Z",
+      "merged_at": "2026-08-21T02:15:00Z"
+    },
+    "4a": {
+      "status": "done",
+      "wave": 4,
+      "branch": "feature/timeline-feature-merger",
+      "model": "sonnet",
+      "loops": 1,
+      "started_at": "2026-08-21T02:16:00Z",
+      "completed_at": "2026-08-21T02:34:00Z",
+      "merged_at": "2026-08-21T02:34:00Z"
+    }
+  }
 }
