@@ -785,6 +785,9 @@ tr.clickable { cursor: pointer; }
 .tl-row.expandable { cursor:pointer; }
 .tl-row.expandable:hover { background:var(--bg-hover); }
 .tl-row.open { background:var(--bg-hover); }
+/* Rows are plain divs, not natively focusable, so keyboard navigation tracks
+   its own indicator instead of relying on :focus. */
+.tl-row.tl-kbd-focus { background:var(--bg-hover); outline:1px solid var(--accent); outline-offset:-1px; }
 .tl-body { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tl-expand { background:var(--bg); border-left:2px solid var(--ev-tool); }
 .tl-expand.d0 { margin-left:0; }
@@ -1647,7 +1650,7 @@ tr.clickable { cursor: pointer; }
       </button>
       <span class="tl-paused" id="tl-paused">paused — scrolled away from the top</span>
     </div>
-    <div class="tl-list" id="tl-list">
+    <div class="tl-list" id="tl-list" tabindex="0">
       <div class="tl-empty">Pick a session to see what it did.</div>
     </div>
   </div>
@@ -2367,6 +2370,36 @@ document.addEventListener('keydown', e => {
       document.getElementById('tab-memories').classList.add('active');
     }
     document.getElementById('memory-search').focus();
+    return;
+  }
+
+  if (e.key === 'f') {
+    e.preventDefault();
+    // Switch to Timeline tab if not already there, mirroring '/' above —
+    // a .focus() on an element inside an inactive .tab-content is a no-op.
+    const tlTab = document.querySelector('.tab[data-tab="timeline"]');
+    if (!tlTab.classList.contains('active')) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      tlTab.classList.add('active');
+      document.getElementById('tab-timeline').classList.add('active');
+      tlActivate();
+    }
+    document.getElementById('tl-filter-text').focus();
+    return;
+  }
+
+  // Event-list arrow-key nav only applies while its keyboard cursor is
+  // reachable — i.e. the list has browser focus (tabindex on #tl-list) or
+  // already has a row marked. Elsewhere, ArrowUp/ArrowDown do nothing, so
+  // they don't hijack scrolling on other tabs.
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const list = document.getElementById('tl-list');
+    const within = list.contains(document.activeElement) || list.querySelector('.tl-kbd-focus');
+    if (within) {
+      e.preventDefault();
+      tlKbdFocusMove(e.key === 'ArrowDown' ? 'next' : 'prev');
+    }
   }
 });
 
@@ -4163,6 +4196,38 @@ document.getElementById('tl-list').addEventListener('click', ev => {
         '<div class="tl-empty">This agent recorded nothing.</div>';
     })
     .catch(() => { box.innerHTML = '<div class="tl-empty">Could not load that agent.</div>'; });
+});
+
+// Moves the keyboard-focus indicator by direction ('next'/'prev') from
+// whichever row currently has it. The class itself is the source of truth
+// (not data-seq, which restarts at 0 inside every expanded subagent's own
+// event list, so it collides across nesting levels and can't identify a
+// row uniquely). Only rows visible in the DOM are reachable, matching what
+// expand/collapse already shows or hides.
+function tlKbdFocusMove(dir) {
+  const rows = [...document.querySelectorAll('#tl-list .tl-row')];
+  if (!rows.length) return;
+  const current = document.querySelector('#tl-list .tl-row.tl-kbd-focus');
+  let idx = current ? rows.indexOf(current) : -1;
+  if (idx === -1) idx = dir === 'prev' ? rows.length - 1 : 0;
+  else if (dir === 'next') idx = Math.min(idx + 1, rows.length - 1);
+  else idx = Math.max(idx - 1, 0);
+  tlKbdFocusSet(rows[idx]);
+  rows[idx].scrollIntoView({ block: 'nearest' });
+}
+
+function tlKbdFocusSet(row) {
+  document.querySelectorAll('#tl-list .tl-row.tl-kbd-focus').forEach(r => r.classList.remove('tl-kbd-focus'));
+  if (row) row.classList.add('tl-kbd-focus');
+}
+
+// Clicking a row also moves the keyboard cursor there, so arrow-key nav
+// continues from wherever the mouse left off instead of jumping back to
+// row 0. A separate listener from the expand/collapse one above, since it
+// reacts to every row rather than only expandable/subagent ones.
+document.getElementById('tl-list').addEventListener('click', ev => {
+  const row = ev.target.closest('.tl-row');
+  if (row) tlKbdFocusSet(row);
 });
 
 document.getElementById('tl-session').addEventListener('change', e => flSelectSession(e.target.value));
