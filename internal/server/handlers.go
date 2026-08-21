@@ -5,14 +5,21 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/fabioconcina/claumon/internal/anomaly"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/herdr"
+	"github.com/fabioconcina/claumon/internal/limits"
+	"github.com/fabioconcina/claumon/internal/live"
 	"github.com/fabioconcina/claumon/internal/memory"
+	"github.com/fabioconcina/claumon/internal/nimbalyst"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
+	"github.com/fabioconcina/claumon/internal/timeline"
 )
 
 type Handlers struct {
@@ -30,6 +37,20 @@ type Handlers struct {
 	RateLimitTier    string
 	StuckThreshold   time.Duration
 	Forecast         *forecast.Service
+
+	// LiveSessions reports Claude Code sessions that are running right now,
+	// from the hook-written state files. Nil when the feature is unavailable;
+	// the endpoint then returns an empty list rather than an error, because a
+	// machine with no hooks installed is a supported configuration.
+	LiveSessions func() []live.Session
+	// Anomalies reports recent burn-rate spikes and tool loops. Nil when
+	// detection is off.
+	Anomalies func() []anomaly.Finding
+	// Limits reports the rate-limit windows as last read, including scoped
+	// ones the gauges do not show. Nil when limit watching is off.
+	Limits func() []limits.Snapshot
+	// LimitEvents reports announced resets and schedule changes, newest last.
+	LimitEvents func() []map[string]any
 
 	ReleasesURL     string
 	updateMu        sync.RWMutex
@@ -171,6 +192,29 @@ func (h *Handlers) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		history = []store.DailyAggregate{}
 	}
 	writeJSON(w, history)
+}
+
+// HandleSessionSearch searches message text across every session transcript.
+//
+// Query params: q (required), limit (optional, 1..500, default 100).
+func (h *Handlers) HandleSessionSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if strings.TrimSpace(q) == "" {
+		writeJSONError(w, "q is required", http.StatusBadRequest)
+		return
+	}
+	limit := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	res, err := parser.SearchSessions(h.claudeDir, q, limit)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, res)
 }
 
 func (h *Handlers) HandleSessions(w http.ResponseWriter, r *http.Request) {
@@ -517,4 +561,195 @@ func writeJSONError(w http.ResponseWriter, msg string, status int) {
 	setJSONHeaders(w)
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// HandleLive lists the Claude Code sessions running right now.
+//
+// This is distinct from /api/sessions, which reports what sessions have done
+// by parsing their transcripts. A transcript cannot say whether a session is
+// mid-turn or waiting on a permission answer; the hook-written state files can.
+func (h *Handlers) HandleLive(w http.ResponseWriter, r *http.Request) {
+	sessions := []live.Session{}
+	if h.LiveSessions != nil {
+		if got := h.LiveSessions(); got != nil {
+			sessions = got
+		}
+	}
+	writeJSON(w, map[string]any{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+// HandleAnomalies lists recent burn-rate spikes and tool loops.
+func (h *Handlers) HandleAnomalies(w http.ResponseWriter, r *http.Request) {
+	findings := []anomaly.Finding{}
+	if h.Anomalies != nil {
+		if got := h.Anomalies(); got != nil {
+			findings = got
+		}
+	}
+	writeJSON(w, map[string]any{
+		"findings": findings,
+		"count":    len(findings),
+	})
+}
+
+// HandleTimeline returns one session's event stream: prompts, replies, tool
+// calls with durations, and the subagents it spawned.
+func (h *Handlers) HandleTimeline(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSONError(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+	tl, err := timeline.Build(h.claudeDir, id)
+	if err != nil {
+		writeJSONError(w, "session not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, tl)
+}
+
+// HandleAgentTimeline returns one spawned subagent's own event stream.
+func (h *Handlers) HandleAgentTimeline(w http.ResponseWriter, r *http.Request) {
+	id, agentID := r.PathValue("id"), r.PathValue("agent")
+	if id == "" || agentID == "" {
+		writeJSONError(w, "missing session or agent id", http.StatusBadRequest)
+		return
+	}
+	tl, err := timeline.BuildAgent(h.claudeDir, id, agentID)
+	if err != nil {
+		writeJSONError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, tl)
+}
+
+// HandleLimits lists every rate-limit window as last read, including the
+// scoped per-model limits the gauges do not surface.
+func (h *Handlers) HandleLimits(w http.ResponseWriter, r *http.Request) {
+	snaps := []limits.Snapshot{}
+	if h.Limits != nil {
+		if got := h.Limits(); got != nil {
+			snaps = got
+		}
+	}
+	writeJSON(w, map[string]any{"limits": snaps, "count": len(snaps)})
+}
+
+// HandleLimitEvents lists the resets and schedule changes claumon has
+// announced, newest last.
+func (h *Handlers) HandleLimitEvents(w http.ResponseWriter, r *http.Request) {
+	events := []map[string]any{}
+	if h.LimitEvents != nil {
+		if got := h.LimitEvents(); got != nil {
+			events = got
+		}
+	}
+	writeJSON(w, map[string]any{"events": events, "count": len(events)})
+}
+
+// HandleFleet lists the Claude sessions that were running inside a time
+// window, each with the subagents it spawned.
+//
+// This is the "what was running, when" view: the unit is the session wherever
+// it ran, not the project directory, because one general workspace can host
+// dozens of unrelated sessions.
+func (h *Handlers) HandleFleet(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	window := timeline.ParseWindow(q.Get("window"))
+
+	// `end` lets the window be panned into the past; it defaults to now.
+	end := time.Now()
+	if v := q.Get("end"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			end = t
+		}
+	}
+	start := end.Add(-window)
+
+	limit := 500
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+			limit = n
+		}
+	}
+
+	// Burn series are opt-in: they cost a transcript read per session, and only
+	// the heat view needs them.
+	withBurn := q.Get("burn") == "1"
+	fleet, err := timeline.BuildFleet(h.claudeDir, start, end, limit, withBurn)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, fleet)
+}
+
+// HandleHerdrFocus brings a session's terminal pane to the front.
+//
+// Only focus is exposed. herdr can also submit prompts and keystrokes to
+// another agent; a dashboard must not, because that spends someone else's
+// context on a decision they did not make.
+func (h *Handlers) HandleHerdrFocus(w http.ResponseWriter, r *http.Request) {
+	pane := r.PathValue("pane")
+	if !herdr.ValidPaneID(pane) {
+		writeJSONError(w, "invalid pane id", http.StatusBadRequest)
+		return
+	}
+	if err := (herdr.Client{}).Focus(pane); err != nil {
+		writeJSONError(w, "focus failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"focused": pane})
+}
+
+// HandleNimbalystReveal raises the Nimbalyst desktop app.
+//
+// It cannot select a session, and the response says so rather than reporting
+// success as though it had. Nimbalyst's URL scheme has no route that addresses
+// an AI session, and the MCP tool that could — navigate_to_session — sits
+// behind a bearer token generated at launch and never persisted, so no other
+// process can hold it.
+//
+// The URL is built here rather than taken from the request: a caller-supplied
+// URL handed to xdg-open is an arbitrary-scheme launcher, and this needs to
+// open exactly one thing.
+func (h *Handlers) HandleNimbalystReveal(w http.ResponseWriter, r *http.Request) {
+	if err := nimbalyst.Reveal(); err != nil {
+		writeJSONError(w, "reveal failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"opened": true,
+		// Named so the UI can be honest about what just happened.
+		"landed_on": "project-manager",
+	})
+}
+
+// HandleNimbalystSessions lists what Nimbalyst knows, for the same reason the
+// herdr equivalent exists: sessions it is tracking that claumon may not have a
+// transcript for yet.
+func (h *Handlers) HandleNimbalystSessions(w http.ResponseWriter, r *http.Request) {
+	sessions, err := (nimbalyst.Client{}).List()
+	if err != nil {
+		// Not an error condition: Nimbalyst simply is not installed or has
+		// never run here.
+		writeJSON(w, map[string]any{"available": false, "sessions": []nimbalyst.Session{}})
+		return
+	}
+	writeJSON(w, map[string]any{"available": true, "sessions": sessions})
+}
+
+// HandleHerdrAgents lists what the workspace manager is running, so the
+// dashboard can show panes claumon has no transcript for yet.
+func (h *Handlers) HandleHerdrAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := (herdr.Client{}).List()
+	if err != nil {
+		// Not an error condition: herdr simply is not running here.
+		writeJSON(w, map[string]any{"available": false, "agents": []herdr.Agent{}})
+		return
+	}
+	writeJSON(w, map[string]any{"available": true, "agents": agents})
 }

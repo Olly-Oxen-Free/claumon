@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
 type StalenessAlert struct {
-	Type       string `json:"type"`                  // "broken-link", "orphaned-file", "index-mismatch"
-	Severity   string `json:"severity"`              // "error", "warning"
+	Type       string `json:"type"`     // "broken-link", "orphaned-file", "index-mismatch"
+	Severity   string `json:"severity"` // "error", "warning"
 	Project    string `json:"project"`
 	FilePath   string `json:"file_path"`
 	TargetPath string `json:"target_path,omitempty"`
@@ -34,12 +35,28 @@ func pathIndex(files []*MemoryFile) map[string]bool {
 
 var mdLinkRegex = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+\.md)\)`)
 
-// extractMarkdownLinks parses markdown link references to .md files from content.
+// wikiLinkRegex matches Obsidian-style [[wikilinks]], used by brain/ wiki articles.
+// The target is a bare article name; ".md" is appended during extraction. An optional
+// "|alias" and "#heading" are stripped so [[page#Section|label]] resolves to page.md.
+var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]`)
+
+// extractMarkdownLinks parses link references to .md files from content.
+// Handles both inline markdown links and Obsidian wikilinks, so brain/ wiki
+// articles participate in the graph and staleness checks alongside memory files.
 func extractMarkdownLinks(content string) []string {
-	matches := mdLinkRegex.FindAllStringSubmatch(content, -1)
 	var links []string
-	for _, m := range matches {
+	for _, m := range mdLinkRegex.FindAllStringSubmatch(content, -1) {
 		links = append(links, m[2])
+	}
+	for _, m := range wikiLinkRegex.FindAllStringSubmatch(content, -1) {
+		name := strings.TrimSpace(m[1])
+		if name == "" {
+			continue
+		}
+		if !strings.HasSuffix(name, ".md") {
+			name += ".md"
+		}
+		links = append(links, name)
 	}
 	return links
 }
@@ -126,9 +143,9 @@ func checkOrphanedFiles(files []*MemoryFile) []StalenessAlert {
 // checkIndexMismatch detects when a MEMORY.md link count doesn't match actual file count.
 func checkIndexMismatch(files []*MemoryFile) []StalenessAlert {
 	type projInfo struct {
-		indexFile   *MemoryFile
-		indexLinks  int
-		fileCount   int
+		indexFile  *MemoryFile
+		indexLinks int
+		fileCount  int
 	}
 	projects := make(map[string]*projInfo)
 

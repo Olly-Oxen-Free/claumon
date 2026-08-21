@@ -96,6 +96,306 @@ claumon reads credentials from `~/.claude/.credentials.json` (created by `claude
 | `--port` | Override the dashboard port (default from config) |
 | `--db` | Override the DB path (e.g. a copy, to run a test instance) |
 
+## Remote access over Tailscale
+
+claumon stays bound to loopback. Reaching it from another device goes through
+`tailscale serve`, which is the authenticated reverse proxy upstream recommends
+rather than publishing the port:
+
+```bash
+sudo tailscale set --operator=$USER          # once, so serve needs no sudo
+tailscale serve --bg --https=8443 http://127.0.0.1:3131
+```
+
+That publishes `https://<machine>.<tailnet>.ts.net:8443` to the **tailnet only** —
+Tailscale terminates TLS with the node's own certificate, and access is whatever
+your tailnet ACLs already allow.
+
+A dedicated HTTPS port rather than a path prefix, for two reasons: port 443's
+root path is often already proxying something else, and the dashboard fetches
+absolute paths (`/api/...`), so mounting it under `/claumon` would send its own
+API calls to whatever owns the root.
+
+Mutating endpoints keep working through the proxy because the same-origin guard
+honours `X-Forwarded-Proto` and `X-Forwarded-Host`, which `tailscale serve` sets.
+
+**Do not enable Funnel.** That would publish the same URL to the open internet,
+and this dashboard exposes session transcripts, memory files, and process
+controls with no authentication of its own.
+
+## Building this fork
+
+```bash
+./build.sh                 # -> ./claumon
+./build.sh ~/.local/bin/claumon
+```
+
+The script stamps the version as `<upstream release>+nirvana.<sha>`, e.g.
+`0.20.0+nirvana.5dd001e`. That is not cosmetic: the dashboard's update check
+compares the running version against upstream's latest release tag, and a bare
+fork string never matches, leaving a permanent "update available" badge that
+cannot be cleared. Semver build metadata sits outside version precedence, so a
+fork of the current release reads as current while a genuine upstream release
+still registers.
+
+`claumon update` refuses to run on a fork build — self-updating would replace
+this binary with upstream's and silently discard everything below. Merge in the
+checkout instead.
+
+## Fork additions
+
+This fork adds four things upstream does not have. All four are off by default and
+configured in `~/.claumon/config.json`.
+
+### Forecast-risk alerts
+
+Upstream shows you a projection; this fork can tell you about it. An alert fires when
+the forecast projects a window past its cap **before** the window resets — which
+happens while current usage is still well below the cap, and that lead time is the
+whole point.
+
+This deliberately does not alert on the current percentage ("you are at 80%").
+Threshold, reset, and schedule-change alerting is a different job, handled by a
+separate watcher; duplicating it here produces two popups for one fact. What claumon
+uniquely knows is the projection.
+
+Two levels: `at_risk` when the central projection clears the cap, `likely` when even
+the lower bound of the 80% credible interval does. An escalation from the first to
+the second alerts once more; nothing else repeats within a window.
+
+```jsonc
+{
+  "alerts": {
+    "enabled": true,
+    "cap_pct": 100,          // projection must clear this
+    "desktop": true,         // notify-send
+    "webhook_url": "",       // optional JSON POST
+    "gauges": ["weekly"]     // optional; omit for all
+  }
+}
+```
+
+### Live session status
+
+Reads the per-session state files under `~/.claude/statusbar/state.d/`, written by a
+Claude Code hook on every lifecycle event, and reports which sessions are **working**,
+**waiting** on a permission answer, **idle**, or **done**.
+
+Transcript parsing — which is what upstream's `/api/sessions` does — can say what a
+session has done, never what it is doing right now; nothing is written to the
+transcript mid-turn. The hook state files can.
+
+The state layout originates with [m1ckc3s/claude-status-bar](https://github.com/m1ckc3s/claude-status-bar)
+and is shared with the NirvanaOS bar chip, so one hook install feeds both. With no
+hooks installed the directory does not exist, the endpoint returns an empty list, and
+nothing else changes.
+
+Exposed at `GET /api/live`, and pushed over SSE as a `live` event whenever a
+transcript changes.
+
+### Anomaly detection
+
+Two detectors, for the two ways an agent session goes wrong quietly:
+
+- **Burn-rate spikes** — a window consuming far faster than your own recent baseline.
+  Scored with a median/MAD modified z-score rather than mean and standard deviation:
+  one runaway session moves a mean enough to hide itself, while the median barely
+  shifts, so a second spike is still caught after a first.
+- **Tool loops** — an agent repeating the same 1-to-4 call cycle with no progress.
+  A cycle is matched on the call's arguments, not just its name: four consecutive
+  `Bash` calls are ordinary work, while the same `Bash` command four times is a loop.
+  Only the tail of the call sequence is examined, so a session that looped earlier and
+  recovered is not reported.
+
+```jsonc
+{
+  "anomaly_enabled": true,
+  "anomaly": {
+    "z_threshold": 3.5,   // conventional modified z-score cutoff
+    "min_samples": 8,     // no scoring against a baseline smaller than this
+    "loop_window": 24,    // trailing tool calls examined
+    "loop_repeats": 4     // cycles before it counts as a loop
+  }
+}
+```
+
+Findings are logged and served at `GET /api/anomalies`.
+
+### Limit reset and schedule alerts
+
+Tells you when a usage window **resets**, and — more importantly — when its schedule
+**moves under you**. A window can reset early or late, be rescheduled by Anthropic, or
+a new scoped limit can appear and an old one vanish. Each of those changes what your
+budget actually is, and nothing else in claumon notices.
+
+This is a different question from "how much have I used" (the gauges) and "where is
+this heading" (the forecast). It is the one thing the separate `nirvana-claude-watch`
+daemon existed to answer, and its detection rules are ported here deliberately,
+including the awkward ones:
+
+- A first poll after a cold start is silent — with no prior reading, every limit would
+  look newly appeared.
+- A `resets_at` move under a minute is server jitter, not a reschedule.
+- A threshold crossing fires once for the highest band cleared, not once per band.
+- State persists across restarts, so a reset that happened while claumon was down is
+  still reported rather than swallowed as a fresh baseline.
+
+Resets are announced twice over, by two paths that dedupe against each other: the poll
+notices a window that has rolled over, and a 15-second ticker notices the moment a
+known reset time passes. The ticker exists because a two-minute poll would report a
+reset up to two minutes late, and the whole point is that the budget is available *now*.
+
+```jsonc
+{
+  "limits_enabled": true,
+  "limit_thresholds": [80, 95],
+  "notify": {
+    "enabled": true,
+    "default": { "desktop": true, "email": false },
+    "events": {
+      "reset_reached":    { "desktop": true, "email": true },
+      "schedule_changed": { "desktop": true, "email": true },
+      "limit_appeared":   { "desktop": true, "email": true },
+      "limit_vanished":   { "desktop": true, "email": true },
+      "approaching":      { "desktop": true, "email": false }
+    },
+    "email": {
+      "to": "you@example.com",
+      "from": "you@example.com",
+      "smtp_host": "127.0.0.1",
+      "smtp_port": 1025,
+      "smtp_user": "you@example.com",
+      "password_command": "secret-tool lookup service proton-bridge user you@example.com"
+    }
+  }
+}
+```
+
+Email goes through STARTTLS and takes its password from a shell command rather than
+the config file, so the secret can live in a keyring. Certificate verification is
+disabled on purpose: the intended target is a local Proton Bridge presenting a
+self-signed certificate on loopback, and the connection never leaves the machine.
+Three attempts with a widening delay, then the failure is reported on the desktop —
+a dropped email is never a silent loss.
+
+Prove delivery without waiting for a real reset:
+
+```bash
+claumon notify                  # reset_reached routing
+claumon notify approaching      # or any other event kind
+```
+
+Current windows, including the scoped per-model limits the gauges do not show, are at
+`GET /api/limits`.
+
+### herdr integration
+
+[herdr](https://github.com/herdrdev/herdr) is the terminal workspace manager these
+sessions run in, and it knows things claumon cannot work out alone: which pane a
+session occupies, what the user named that task, and whether the agent is working or
+idle right now. It keys all of it by the same session id, so the two join cleanly.
+
+The join makes a row actionable rather than merely informative. A session stops being
+"something in Documents/Work" and becomes "the pane in workspace 3 titled *Audit AI
+tool usage*, still working" — and the pane badge on the row puts it in front of you.
+
+herdr's live status also overrides claumon's own guess: claumon infers "running" from
+process state and file mtimes, while herdr watches the process directly.
+
+Only **focus** is exposed. herdr can also submit prompts and keystrokes to another
+agent; a dashboard must not, because that spends someone else's context on a decision
+they did not make.
+
+Everything degrades to nothing when herdr is absent — it is an enrichment, not a
+dependency. `GET /api/herdr/agents` reports what it sees;
+`POST /api/herdr/focus/{pane}` brings a pane forward.
+
+### Session timeline
+
+A **Timeline** tab showing what a session actually did: prompts, replies, tool calls
+with how long each took, and the subagents it spawned — with cost attributed per step.
+
+claumon's session parser answers "what did this session cost". It merges tool results
+into the assistant message that requested them, which is right for a cost summary and
+wrong for a timeline: the merge discards the result's timestamp, and that difference
+*is* the tool call's duration. So `internal/timeline` reads the transcript itself,
+routing cost through the same pricing table so there is one implementation of it.
+
+Subagents live in their own files — a session's transcript at
+`<project>/<session>.jsonl`, each spawned agent at
+`<project>/<session>/subagents/agent-<id>.jsonl` with a sibling `.meta.json` naming
+its type, its task, and the `toolUseId` of the parent's `Task` call. That id is what
+makes exact nesting possible: agents fold into the Task call that spawned them rather
+than being matched by position. An agent whose meta is missing still appears, so a
+spawned agent is never silently dropped.
+
+The tab opens with a **session map**: every Claude session that was running inside a
+chosen window — 1 hour, 3 hours, 1 day, 3 days, or 1 week — as a row, with the agents
+it spawned nested beneath it, each placed at the moment it was spawned and drawn for
+as long as it stayed active. Hovering gives repo, working tree, branch, agent type,
+model, start, duration, cost and message count.
+
+The unit is the session, not the project directory. A general workspace hosts dozens
+of unrelated sessions, and grouping by directory buries them.
+
+Positions are percentages of the window rather than pixels on a scrolling canvas, so
+the chart always fits its container and the right edge is always the end of the
+window. An earlier version scrolled horizontally and opened at the left, which hid
+the newest sessions — the rows the eye goes to first.
+
+Clicking a row loads that session's own event list below: the map says *when*, the
+list says *what*.
+
+The map scrolls horizontally at a fixed scale per window — the same duration is the
+same width whatever else is on screen — and opens at the right-hand edge, which is
+the end of the window. It only jumps there on a deliberate action (first load, a
+window change, or the **now** button); a chart that scrolls itself while you are
+reading an earlier part of the day is worse than one that stays put.
+
+The event list sorts **newest first** by default, with an oldest-first toggle, and
+refreshes itself while a session is live. That refresh is **paused whenever you have
+scrolled away from the newest end**, so the list never reflows under you mid-read;
+a marker in the toolbar says when it is holding back.
+
+Tools and events carry icons following agents-observe's registry — a Bash call, a
+file read, a spawned agent and an MCP tool are each recognisable by shape before the
+label is read.
+
+Subagent rows expand in place, fetching that agent's own events on demand — a session
+can spawn dozens, and loading them all up front would make the first paint useless.
+
+Served at `GET /api/timeline/{session_id}` and
+`GET /api/timeline/{session_id}/agents/{agent_id}`.
+
+Note on the "tool time" total: parallel calls are each counted in full, so it measures
+work performed, not elapsed wall clock, and legitimately exceeds a session's duration.
+
+### OpenTelemetry export
+
+Pushes utilization, projected utilization, burn rate, and live session counts to an
+OTLP/HTTP collector, so claumon's numbers reach an existing Grafana without running a
+separate four-container observability stack next to it.
+
+The OTLP JSON is written by hand rather than pulled from the OpenTelemetry SDK: that
+SDK is a large dependency tree, and claumon ships as one static binary with no runtime
+requirements. The payload is a few nested structs, pinned by a golden test.
+
+```jsonc
+{
+  "otel": {
+    "enabled": true,
+    "endpoint": "http://localhost:4318",
+    "interval_seconds": 60,
+    "service_name": "claumon",
+    "headers": { "Authorization": "Bearer ..." }
+  }
+}
+```
+
+Metric names use the `gen_ai.*` semantic conventions where one fits, and a `claumon.*`
+prefix where none does — utilization against a subscription's rate limits has no
+convention.
+
 ## Run as a background service
 
 Run claumon automatically on login so the dashboard is always available. First, move the binary to a permanent location, then register the service.

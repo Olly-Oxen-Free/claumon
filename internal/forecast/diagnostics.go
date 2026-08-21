@@ -15,9 +15,9 @@ type Diagnostics struct {
 	NSessions    int
 	NReplays     int
 	// Forecast at reset
-	CoverageF80    float64 // fraction of replays where u_final fell in [F-, F+]
-	MAEFpct        float64 // mean absolute error of F (in percentage points)
-	BiasFpct       float64 // mean(F - u_final), pct points; +ve = over-predicting
+	CoverageF80 float64 // fraction of replays where u_final fell in [F-, F+]
+	MAEFpct     float64 // mean absolute error of F (in percentage points)
+	BiasFpct    float64 // mean(F - u_final), pct points; +ve = over-predicting
 	// Spread sanity check: if mean_e2 / mean_predicted_variance >> 1, the
 	// 80% CI is too narrow; if << 1, it's too wide. Calibrated model -> ~1.
 	MeanE2         float64 // mean of (u_final - F)^2 across replays
@@ -27,13 +27,13 @@ type Diagnostics struct {
 	MeanTauPostSq  float64 // mean of the conjugate tau_post^2 (pre-floor)
 	BarTauSq       float64 // calibration's bar tau^2 (the floor value)
 	// ETA
-	NETAFinite     int     // replays where the forecast emitted a finite median ETA AND threshold was crossed in reality
-	MAEEtaMin      float64 // mean abs error of MC median ETA vs actual crossing time, minutes
-	BiasEtaMin     float64 // mean(eta_median - actual_crossing), minutes
-	CoverageEta80  float64 // fraction with finite ETA CI where actual crossing was in [lower, upper]
-	NETACovered    int     // denominator for CoverageEta80
+	NETAFinite    int     // replays where the forecast emitted a finite median ETA AND threshold was crossed in reality
+	MAEEtaMin     float64 // mean abs error of MC median ETA vs actual crossing time, minutes
+	BiasEtaMin    float64 // mean(eta_median - actual_crossing), minutes
+	CoverageEta80 float64 // fraction with finite ETA CI where actual crossing was in [lower, upper]
+	NETACovered   int     // denominator for CoverageEta80
 	// Per-horizon coverage of F80 (binned by remaining hours at replay)
-	HorizonBins    []HorizonBin
+	HorizonBins []HorizonBin
 }
 
 // HorizonBin reports per-remaining-horizon F80 coverage so we can see whether
@@ -64,17 +64,17 @@ func Score(sessions []Session, prior Prior, cal Calibration, cfg Config, forecas
 
 	d := Diagnostics{ModelVersion: ModelVersion, BarTauSq: cal.BarTauSq}
 	var (
-		coveredF       int
-		sumAbsErr      float64
-		sumErr         float64
-		sumE2          float64
-		sumPredVar     float64
-		sumEffRateVar  float64
-		sumTauPostSq   float64
-		etaErrors      []float64 // minutes
-		etaSignedErr   []float64
-		etaCovered     int
-		etaCoverable   int
+		coveredF      int
+		sumAbsErr     float64
+		sumErr        float64
+		sumE2         float64
+		sumPredVar    float64
+		sumEffRateVar float64
+		sumTauPostSq  float64
+		etaErrors     []float64 // minutes
+		etaSignedErr  []float64
+		etaCovered    int
+		etaCoverable  int
 	)
 
 	// 4 horizon bins, log-ish

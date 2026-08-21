@@ -31,6 +31,18 @@ func New(claudeDir string, st *store.Store, webFS fs.FS) *Server {
 	mux.HandleFunc("GET /api/heatmap", handlers.HandleHeatmap)
 	mux.HandleFunc("GET /api/history", handlers.HandleHistory)
 	mux.HandleFunc("GET /api/sessions", handlers.HandleSessions)
+	mux.HandleFunc("GET /api/sessions/search", handlers.HandleSessionSearch)
+	mux.HandleFunc("GET /api/live", handlers.HandleLive)
+	mux.HandleFunc("GET /api/fleet", handlers.HandleFleet)
+	mux.HandleFunc("GET /api/herdr/agents", handlers.HandleHerdrAgents)
+	mux.HandleFunc("POST /api/herdr/focus/{pane}", handlers.HandleHerdrFocus)
+	mux.HandleFunc("GET /api/nimbalyst/sessions", handlers.HandleNimbalystSessions)
+	mux.HandleFunc("POST /api/nimbalyst/reveal", handlers.HandleNimbalystReveal)
+	mux.HandleFunc("GET /api/timeline/{id}", handlers.HandleTimeline)
+	mux.HandleFunc("GET /api/timeline/{id}/agents/{agent}", handlers.HandleAgentTimeline)
+	mux.HandleFunc("GET /api/anomalies", handlers.HandleAnomalies)
+	mux.HandleFunc("GET /api/limits", handlers.HandleLimits)
+	mux.HandleFunc("GET /api/limits/events", handlers.HandleLimitEvents)
 	mux.HandleFunc("GET /api/memories", handlers.HandleMemories)
 	mux.HandleFunc("GET /api/memories/staleness", handlers.HandleMemoriesStaleness)
 	mux.HandleFunc("GET /api/memories/graph", handlers.HandleMemoriesGraph)
@@ -67,6 +79,13 @@ func secureLocalRequests(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
+		} else {
+			// The dashboard is a single embedded file with a stable URL, and
+			// the embedded filesystem has no meaningful modification time, so
+			// a browser will happily hold a stale copy across a rebuild —
+			// showing an old UI against a new binary, which reads as the new
+			// work simply not existing. Revalidate every load.
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {

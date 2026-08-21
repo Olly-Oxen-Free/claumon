@@ -1,0 +1,154 @@
+metadata:
+  prd_slug: timeline-feature-merger
+  created_at: "2026-08-20T00:00:00Z"
+  total_complexity: 24
+  task_count: 6
+
+tasks:
+  - id: "1a"
+    title: "Client-side filter/search over the event list"
+    description: >
+      /api/sessions/search (internal/parser/search.go) scans the entire ~/.claude
+      transcript corpus (multi-gigabyte, no session-scoping param, only matches
+      message text/thinking) — wrong tool for narrowing one session's already-fetched
+      event list. Instead, filter client-side over the array timeline.Event objects
+      already delivered by GET /api/timeline/{id} and held by tlRenderEvents
+      (web/index.html): Kind, Title (tool name / agent type / role), Detail, Full,
+      Output, IsError. Add a filter box above the event list plus a tool-name chip and
+      an error-only chip; combine as AND. Do not touch internal/parser/search.go or
+      internal/server/handlers.go — this task is frontend-only.
+    depends_on: []
+    complexity: 3
+    priority: must
+    success_criteria:
+      - "Typing in the filter box narrows visible event-list rows live, matching against Title/Detail/Full/Output client-side"
+      - "Tool-name filter chip and error-only (IsError) filter chip both work and combine with free text as AND"
+      - "Filtering to zero results shows the existing 'no events' empty state, not a broken layout"
+      - "make test and go vet pass"
+    files_affected:
+      - "web/index.html"
+
+  - id: "1b"
+    title: "NIMBLE PRD panel (new tab reading local .nimble/prds/* state)"
+    description: >
+      Add a new internal/nimble package (mirrors the one-package-per-subsystem
+      convention already used by internal/parser, internal/timeline, etc.) that reads
+      tasks.yaml/execution_plan.yaml/status.json from .nimble/prds/*/ using
+      gopkg.in/yaml.v3 (new dependency — pure Go, no CGO, safe under
+      CGO_ENABLED=0; needed because tasks.yaml uses block scalars a hand-rolled
+      parser can't handle reliably). Discovery rule: claumon has no single "current
+      repo" — enumerate unique project directories from parser.SessionSummary.CWD
+      across recent sessions (same source fleet.go already uses), scan each for a
+      .nimble/prds/ folder, and group results by project. Register a new route in
+      internal/server/server.go. Add a new top-level tab in web/index.html: extend the
+      `const tabs = [...]` array (web/index.html:2244) and the activation switch
+      (:2251-2252) with a new #tab-nimble entry — keep this edit confined to that one
+      array/switch plus a new self-contained panel block, since 1a is editing the
+      event-list region of the same file concurrently.
+    depends_on: []
+    complexity: 5
+    priority: should
+    success_criteria:
+      - "New tab lists every .nimble/prds/* PRD found across all known project CWDs, grouped by project, with prd_slug/status/wave progress"
+      - "BLOCKED/STALE/CRASHED task states (from status.json) surface as visible alerts on the relevant PRD"
+      - "Empty state: 'No NIMBLE PRDs found' when no known project CWD has a .nimble/prds/ folder"
+      - "go.mod gains gopkg.in/yaml.v3 as the only new dependency; CGO_ENABLED=0 build still succeeds"
+      - "make test and go vet pass"
+    files_affected:
+      - "internal/nimble/nimble.go"
+      - "internal/server/server.go"
+      - "web/index.html"
+      - "go.mod"
+
+  - id: "2a"
+    title: "Recursive subagent hierarchy — Go parsing"
+    description: >
+      internal/timeline/timeline.go's BuildAgent never calls attachAgents
+      recursively, so a subagent's own subagent is parsed as an inert Task row
+      instead of a nested agent. Fix BuildAgent to recurse to arbitrary depth.
+      AgentRef.SpawnDepth (timeline.go:113,:490) is already parsed and may cover part
+      of the depth-tracking need — reuse it rather than re-deriving depth. Add a
+      children field to FleetAgent (fleet.go:158-159, currently flat) and to
+      agentSpans (fleet.go:520) so the fleet builder can expose nesting to the
+      frontend. Do not touch BurnSeries/fs.Burn wiring (fleet.go:278) — burn is
+      computed once per session, unaffected by agent nesting, and is out of scope
+      (internal/timeline/burn.go is a must-not-touch boundary). Add test fixtures
+      covering at least 3 levels of agent nesting.
+    depends_on: []
+    complexity: 4
+    priority: must
+    success_criteria:
+      - "BuildAgent nests subagents of subagents to arbitrary depth, verified by a 3-level test fixture"
+      - "FleetAgent/agentSpans expose the nested structure to callers without altering existing single-level sessions' output"
+      - "BurnSeries/fs.Burn wiring in fleet.go is untouched"
+      - "internal/timeline package tests cover the 3-level fixture"
+      - "make test and go vet pass"
+    files_affected:
+      - "internal/timeline/timeline.go"
+      - "internal/timeline/fleet.go"
+      - "internal/timeline/timeline_test.go"
+      - "internal/timeline/fleet_test.go"
+
+  - id: "2b"
+    title: "Recursive subagent hierarchy — gantt and event-list rendering"
+    description: >
+      Consumes 2a's nested FleetAgent/agent data. Update flRender (web/index.html) to
+      indent/nest agent rows per depth in the gantt instead of one flat level under
+      the session. Update the event list's subagent-row expansion to recurse into
+      further subagent event lists, lazily fetched per level as it already does for
+      one level. Must not regress fork-curve, heat-view, or PID-based liveness
+      rendering landed 2026-08-19 (flForkCurve, flHeat, liveness bars) — these are
+      unrelated to agent-row nesting depth and should be visually unchanged for
+      sessions without deep nesting.
+    depends_on: ["1a", "2a"]
+    complexity: 4
+    priority: must
+    success_criteria:
+      - "A session with a subagent that itself spawned a subagent renders 2+ levels deep in the gantt, correctly indented"
+      - "Same multi-level nesting expands correctly in the event list, lazily fetched per level"
+      - "Fork-curve, heat-view, and liveness rendering is visually unchanged for sessions without deep nesting"
+      - "make test and go vet pass"
+    files_affected:
+      - "web/index.html"
+
+  - id: "3a"
+    title: "Live/Paused toggle for the gantt"
+    description: >
+      Add a Live/Paused toggle button near the existing time-window selector
+      (1h/3h/1d/3d/1w). Paused freezes the frontend's SSE-driven redraw behavior (the
+      "sessions" event handler that calls tlRefresh()/flRefreshSoon()) while
+      preserving current selection/scroll state; Live resumes normal refresh
+      behavior. No server-side change — data collection continues either way, this
+      only gates frontend redraws. claumon's gantt is already historical/scrollable,
+      so this is scoped as a "pin the current view" toggle, not a from-scratch
+      rewind/scrub timeline.
+    depends_on: ["2b"]
+    complexity: 4
+    priority: should
+    success_criteria:
+      - "Clicking Pause stops gantt redraws on incoming SSE 'sessions' events"
+      - "Selection and scroll position are preserved across pause/resume"
+      - "Clicking Live resumes normal refresh behavior, picking up any missed updates"
+      - "make test and go vet pass"
+    files_affected:
+      - "web/index.html"
+
+  - id: "4a"
+    title: "Keyboard nav layer across timeline regions"
+    description: >
+      Add keyboard shortcuts using an unbound key — '/' is already globally bound to
+      the Memories-tab search (web/index.html:2256-2267), do not touch or overload it.
+      Use 'f' to focus the Timeline filter box (from 1a). At minimum, add arrow-key
+      navigation within the event list when it has focus. Stretch goal if time
+      allows: additional region-jump shortcuts across gantt/event-list/filter-box/
+      NIMBLE-panel, reimplemented in vanilla JS with no new dependency.
+    depends_on: ["1a", "3a"]
+    complexity: 4
+    priority: could
+    success_criteria:
+      - "Pressing 'f' focuses the Timeline filter box from anywhere in the Timeline tab"
+      - "Arrow keys navigate rows within the event list when it has focus"
+      - "No conflict with existing bindings: Escape (modal close) and '/' (Memories search) are untouched"
+      - "make test and go vet pass"
+    files_affected:
+      - "web/index.html"

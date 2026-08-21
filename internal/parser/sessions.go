@@ -39,29 +39,29 @@ type SessionSummary struct {
 	EstimatedCostUSD  float64   `json:"estimated_cost_usd"`
 	MessageCount      int       `json:"message_count"`
 	CWD               string    `json:"cwd"`
-	HasFileEdits    bool      `json:"has_file_edits"`
-	CacheEfficiency float64   `json:"cache_efficiency"`
-	WasteFlags      []string  `json:"waste_flags"`
-	ContextLength   int       `json:"context_length"`
-	IsRunning       bool      `json:"is_running"`
-	IsStuck         bool      `json:"is_stuck"`
-	PID             int       `json:"pid,omitempty"`
-	IdleMinutes     float64   `json:"idle_minutes,omitempty"`
+	HasFileEdits      bool      `json:"has_file_edits"`
+	CacheEfficiency   float64   `json:"cache_efficiency"`
+	WasteFlags        []string  `json:"waste_flags"`
+	ContextLength     int       `json:"context_length"`
+	IsRunning         bool      `json:"is_running"`
+	IsStuck           bool      `json:"is_stuck"`
+	PID               int       `json:"pid,omitempty"`
+	IdleMinutes       float64   `json:"idle_minutes,omitempty"`
 }
 
 // SessionMessage represents a single parsed message from a session for the detail view.
 type SessionMessage struct {
-	Type      string    `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	Model     string    `json:"model,omitempty"`
-	Role      string    `json:"role"`
-	Text      string    `json:"text"`
-	TokensIn  int       `json:"tokens_in,omitempty"`
-	TokensOut int       `json:"tokens_out,omitempty"`
-	CacheRead   int       `json:"cache_read,omitempty"`
-	CacheCreate int       `json:"cache_create,omitempty"`
+	Type        string     `json:"type"`
+	Timestamp   time.Time  `json:"timestamp"`
+	Model       string     `json:"model,omitempty"`
+	Role        string     `json:"role"`
+	Text        string     `json:"text"`
+	TokensIn    int        `json:"tokens_in,omitempty"`
+	TokensOut   int        `json:"tokens_out,omitempty"`
+	CacheRead   int        `json:"cache_read,omitempty"`
+	CacheCreate int        `json:"cache_create,omitempty"`
 	ToolCalls   []ToolCall `json:"tool_calls,omitempty"`
-	Thinking    string    `json:"thinking,omitempty"`
+	Thinking    string     `json:"thinking,omitempty"`
 }
 
 // ToolCall represents a single tool_use invocation from an assistant message,
@@ -80,8 +80,8 @@ type jsonlLine struct {
 	SessionID string    `json:"sessionId"`
 	CWD       string    `json:"cwd"`
 	Message   *struct {
-		Model   string `json:"model"`
-		Role    string `json:"role"`
+		Model   string          `json:"model"`
+		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content,omitempty"`
 		Usage   *struct {
 			InputTokens              int `json:"input_tokens"`
@@ -195,6 +195,15 @@ func SetPricingTable(t *pricing.Table) {
 func estimateCost(s *SessionSummary) float64 {
 	cost := costFor(s.Model, s.InputTokens, s.OutputTokens, s.CacheReadTokens, s.CacheCreateTokens)
 	return math.Round(cost*10000) / 10000
+}
+
+// MessageCostUSD returns the USD cost of one message's token mix.
+//
+// Exported so other packages (the timeline) attribute cost through the same
+// pricing table and model normalization the session summaries use; a second
+// implementation would drift.
+func MessageCostUSD(model string, in, out, cacheRead, cacheCreate int) float64 {
+	return costFor(model, in, out, cacheRead, cacheCreate)
 }
 
 // costFor returns the unrounded USD cost for the given token mix under the
@@ -820,7 +829,7 @@ func hasOnlyToolResults(content json.RawMessage) bool {
 }
 
 var (
-	xmlTagRe     = regexp.MustCompile(`<[^>]+>`)
+	xmlTagRe      = regexp.MustCompile(`<[^>]+>`)
 	fullTagLineRe = regexp.MustCompile(`(?m)^<\w[^>]*>.*?</\w+>\s*`)
 )
 
@@ -861,9 +870,9 @@ func cacheEfficiency(s *SessionSummary) float64 {
 }
 
 const (
-	wasteMinTokens      = 50_000
-	wasteMinMessages    = 10
-	wasteLowEfficiency  = 0.5
+	wasteMinTokens     = 50_000
+	wasteMinMessages   = 10
+	wasteLowEfficiency = 0.5
 )
 
 // detectWaste flags sessions with low cache efficiency or high token
@@ -894,4 +903,3 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen-1] + "…"
 }
-

@@ -436,6 +436,396 @@ tr.clickable { cursor: pointer; }
 }
 .backdrop.open { display: block; }
 
+/* Event icons */
+.ev-ic { width:13px; height:13px; flex:0 0 13px; vertical-align:-2px; }
+.ev-ic use { fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.ev-ic.fill use { fill:currentColor; stroke:none; }
+/* Who produced a line, as one set of tokens rather than a colour repeated at
+   each use: the rail, the icon and any future accent all read from these, so
+   changing what "the model" looks like is a single edit. --blue is defined
+   here because the base palette is warm and has none. */
+:root {
+  --ev-user:  #6aa6e8;
+  --ev-model: var(--accent);
+  --ev-tool:  #8a8079;
+  --ev-agent: var(--purple);
+  --ev-compact: var(--yellow);
+}
+.ic-tool  { color:var(--ev-tool); }
+.ic-agent { color:var(--ev-agent); }
+.ic-user  { color:var(--ev-user); }
+.ic-model { color:var(--ev-model); }
+.ic-err   { color:var(--red); }
+.ic-compact { color:var(--ev-compact); }
+/* An MCP call is still tool usage; the plug shape is what sets it apart. */
+.ic-mcp   { color:var(--ev-tool); }
+
+/* The thread being read is marked by a border around its row rather than by
+   being drawn brighter than the rest. Every line renders at full strength, so
+   there is no dimness left to lift — and selection by brightness competed with
+   heat, with live-vs-ended colour, and with the cold dashes, all of which are
+   themselves carried by intensity. A border collides with none of them. */
+.fl-row.sel {
+  background:rgba(218,119,86,.07);
+  box-shadow:inset 0 0 0 1px var(--accent);
+  border-radius:3px;
+}
+.fl-row.sel .fl-label {
+  background:rgba(218,119,86,.10);
+}
+.fl-row.sel .fl-name { color:var(--text-bright); font-weight:600; }
+
+/* A split thread: the replayed history is faint, and an elbow drops out of the
+   parent's row at the moment the two diverged. */
+/* The join is drawn at the bars' own thickness, and overflows its row upward
+   into the parent's, so the two rows must not clip it. */
+/* Under the bars: the join should disappear beneath the line it diverges from
+   and the one it merges into, not overlap them. */
+.fl-fork-curve { position:absolute; overflow:visible; pointer-events:none; z-index:0; }
+.fl-row { overflow:visible; }
+
+/* Heat view */
+.fl-legend { display:inline-flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); }
+.fl-legend i {
+  display:inline-block; width:54px; height:8px; border-radius:4px;
+  background:linear-gradient(90deg,#1b1b2f,#3b1e6e,#8b1e5a,#d63a2f,#f2891f,#ffd400,#fff6c8);
+}
+.fl-legend b { display:none; }
+/* Nothing special for heat: selection is a border on the row, which leaves
+   the bars' own colour — the reading — untouched. The old rule existed to undo
+   a glow that no longer exists. */
+
+/* Reading marker: where the event list is, projected onto the timeline. */
+.fl-read {
+  position:absolute; top:0; width:0; height:0; display:none;
+  border-left:5px solid transparent; border-right:5px solid transparent;
+  border-top:7px solid var(--ev-user);
+  transform:translateX(-50%); z-index:3; pointer-events:none;
+  filter:drop-shadow(0 0 3px color-mix(in srgb, var(--ev-user) 70%, transparent));
+}
+.fl-mark.compact .fl-markic { color:var(--ev-compact); }
+
+/* Lane markers, drawn the way a transit map marks a stop: a ring in the
+   line's own colour, filled with the background so the line reads as passing
+   behind it rather than being interrupted. The ring is the line — which is
+   why it takes the row's colour rather than a per-event one, and why the icon
+   inside it is dim: the mark's job is to say "something happened here on this
+   line", and only then what.
+   --fl-line is set per row to whatever that session's bar is drawn in. */
+.fl-mark {
+  position:absolute; top:8px; transform:translateX(-50%);
+  width:18px; height:18px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg-surface);
+  /* The ring is simply the line's colour. Bars, dashes and rings all render
+     at full strength, so nothing has to be matched to anything — which is what
+     kept going wrong when they were each carrying their own opacity. */
+  border:2.5px solid var(--fl-line, var(--accent));
+  box-sizing:border-box; cursor:pointer; z-index:4;
+}
+.fl-mark:hover {
+  background:var(--bg-hover);
+  /* Hover is the one time a stop should outshine its line. */
+  border-color:var(--fl-line, var(--accent));
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--fl-line, var(--accent)) 30%, transparent);
+}
+.fl-markic { width:9px; height:9px; display:block; color:var(--text-dim); }
+/* Optical centring. Each glyph's ink occupies a different part of the shared
+   16x16 box, so they are nudged individually rather than redrawn. */
+.fl-mark.end .fl-markic   { transform:translate(0.5px, 0); }
+.fl-mark.start .fl-markic { transform:translate(0, -0.5px); }
+.fl-markic use { fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+/* Every stop is the same object — ring, background fill, dim glyph — and only
+   the glyph inside differs. The terminus used to be filled solid with an
+   inverted glyph, which made it read as a different kind of thing rather than
+   as one more stop on the line. */
+
+
+.fl-forkic { width:10px; height:10px; flex-basis:10px; color:var(--teal); }
+.fl-forkic use { fill:none; stroke:currentColor; stroke-width:1.5; }
+
+.fl-clear { border-color:var(--accent); color:var(--accent); }
+.fl-clear:hover { background:rgba(218,119,86,.12); color:var(--text-bright); }
+
+.fl-zoomlabel { min-width:38px; font-family:ui-monospace,monospace; }
+
+.fl-herdric { cursor:pointer; }
+.fl-herdric:hover { color:var(--text-bright); }
+.fl-herdric.failed { color:var(--red); }
+
+/* Fleet gantt */
+.fl-controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+.fl-windows, .fl-pan { display:flex; gap:4px; }
+.fl-btn {
+  background:var(--bg-surface); color:var(--text-dim); border:1px solid var(--border);
+  border-radius:5px; padding:3px 9px; font-size:11px; cursor:pointer;
+}
+.fl-btn:hover { color:var(--text); }
+.fl-btn.on { background:var(--accent); color:#111; border-color:var(--accent); font-weight:600; }
+.fl-range, .fl-count { font-size:11px; color:var(--text-dim); font-family:ui-monospace,monospace; }
+.fl-count { margin-left:auto; }
+
+.fl-scroll {
+  overflow-x:auto; overflow-y:auto; max-height:560px;
+  border:1px solid var(--border); border-radius:6px; background:var(--bg-surface);
+  /* Keep the horizontal scrollbar visible rather than overlay-on-hover: it is
+     the only cue that there is more timeline off to the side. */
+  scrollbar-width:thin;
+}
+.fl-scroll::-webkit-scrollbar { height:10px; width:10px; }
+.fl-scroll::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px; }
+/* max-content, not auto: the rows are flex containers and take their width
+   from the parent, so an auto-sized canvas collapses to the viewport and the
+   tracks overflow invisibly instead of making the container scroll. */
+.fl-canvas { width:max-content; min-width:100%; }
+.fl-row { display:flex; align-items:center; height:34px; }
+.fl-row + .fl-row { border-top:1px solid var(--border); }
+.fl-row:hover { background:rgba(127,127,127,.06); }
+/* Two rows: what the work is, then where it happened. The width is a custom
+   property so the drag handle can change it without touching every rule that
+   depends on it. */
+.fl-label {
+  position:sticky; left:0; z-index:6;
+  flex:0 0 var(--fl-label-w); width:var(--fl-label-w);
+  display:flex; flex-direction:column; justify-content:center; gap:1px;
+  padding:0 10px 0 8px; height:34px;
+  background:var(--bg-surface); border-right:1px solid var(--border);
+  font-size:11px; cursor:pointer; overflow:hidden;
+}
+.fl-l1 { display:flex; gap:5px; align-items:center; line-height:14px; overflow:hidden; }
+.fl-l2 { display:flex; gap:5px; align-items:center; line-height:12px; overflow:hidden; }
+.fl-row:hover .fl-label { background:var(--bg-hover); }
+.fl-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1 1 auto; min-width:0; }
+/* A session herdr is running takes herdr's own colour, so "live in a pane" is
+   read from the title itself rather than from a separate chip. */
+.fl-name.herdr { color:var(--teal); }
+.fl-herdric { width:11px; height:11px; flex:0 0 11px; color:var(--teal); }
+.fl-herdric use { fill:currentColor; stroke:none; }
+/* The Nimbalyst mark gets the app's own blue, so a session hosted there is
+   told apart from a herdr pane at a glance rather than by reading. The hash
+   strokes are knocked out in the surface colour the way the app's icon knocks
+   them out in white. */
+.fl-nimbic { width:11px; height:11px; flex:0 0 11px; color:#6291f8; cursor:pointer; }
+.fl-nimbic .nb-body { fill:currentColor; stroke:none; }
+.fl-nimbic .nb-hash { fill:none; stroke:var(--bg-surface); stroke-width:1.9; }
+.fl-nimbic:hover { color:#8fb0fb; }
+.fl-nimbic.failed { color:var(--red); }
+.fl-name.nimbalyst { color:#6291f8; }
+/* Where the work happened, under the name of the work. Dim and shrinkable:
+   when the label runs out of room the location gives way before the task
+   name does, because two rows in one repo are told apart by their names. */
+/* The location line, dimmer than the name above it: present when wanted,
+   never competing with the row's identity. */
+.fl-ctx {
+  color:var(--text-dim); font-size:10px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; flex:1 1 auto; min-width:0;
+  opacity:.72;
+}
+/* A worktree name is the one part of the location that distinguishes
+   otherwise identical rows, so it is the part that keeps its colour. */
+.fl-wt { color:var(--purple); }
+.fl-when { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:10px; margin-left:auto; flex:0 0 auto; }
+.fl-label.agent { padding-left:22px; }
+.fl-label.agent .fl-name { color:var(--purple); }
+/* Drag handle on the label column's right edge. Sits inside the sticky label
+   so it travels with it during horizontal scroll, and is wider than the border
+   it straddles so it can actually be grabbed. */
+.fl-grip {
+  position:absolute; top:0; right:-3px; width:7px; height:100%;
+  cursor:col-resize; z-index:7;
+}
+.fl-grip::after {
+  content:""; position:absolute; left:3px; top:0; width:1px; height:100%;
+  background:var(--teal); opacity:0; transition:opacity .12s;
+}
+.fl-grip:hover::after, .fl-canvas.resizing .fl-grip::after { opacity:.8; }
+/* While dragging, the pointer owns the gesture: text selection and row hover
+   highlights would otherwise fire on every move. */
+.fl-canvas.resizing { user-select:none; }
+.fl-canvas.resizing .fl-row:hover { background:none; }
+
+.fl-track { position:relative; height:34px; flex:0 0 auto; }
+.fl-tick { display:none; }
+.fl-grid { position:absolute; top:0; bottom:0; width:1px; background:var(--border); opacity:.5; }
+.fl-now { position:absolute; top:0; bottom:0; width:1px; background:var(--green); opacity:.8; }
+/* A span is context, not the subject: thin and low-contrast so the markers
+   sitting on it are what the eye lands on. */
+.fl-bar {
+  position:absolute; top:15px; height:5px; border-radius:3px; cursor:pointer;
+  background:var(--accent); min-width:3px; z-index:1;
+}
+.fl-bar:hover { filter:brightness(1.25); }
+.fl-bar.agent { background:var(--purple); top:16px; height:3px; }
+/* A lull past the prompt cache's TTL: the session is open and the thread is
+   intact, but resuming is no longer free. Drawn as a dashed run of the same
+   colour and weight — the same line, shown to be idling, rather than a
+   different element. The dashes are a repeating gradient rather than a border
+   so the bar keeps its exact height and radius. */
+/* The dash period is set per segment (--fl-dash), fitted so a whole number of
+   dashes spans it. A fixed period made a narrow lull show a single stub and a
+   wide one show thirty ticks; neither read as "the same line, idling". The
+   dash is always half the period, so the texture is identical at every width
+   and only its scale changes. */
+.fl-bar.live { background:var(--green); }
+/* Declared after .live deliberately, and matched on .idle alone so a live
+   session's cold stretch still dashes. The two rules have equal specificity,
+   so .live sitting below this one silently repainted every cold stretch solid
+   green — a running process with a cold context looked like continuous work,
+   which is exactly the case the dashes exist to show.
+   The dash colour comes from --fl-line: the line's own colour normally, and
+   the heat ramp's zero when heat is on, which the renderer sets per segment. */
+.fl-bar.idle {
+  background:repeating-linear-gradient(90deg,
+    var(--fl-line, var(--accent)) 0 calc(var(--fl-dash) * .5),
+    transparent calc(var(--fl-dash) * .5) var(--fl-dash));
+  border-radius:0;
+}
+/* Heat does not apply to a cold stretch: heat is token burn, and a cold
+   stretch is by definition the time when none was happening. Colouring it read
+   as demand that never occurred — worse, the gradient interpolates between the
+   buckets either side, so the hotter the work around a lull, the hotter the
+   lull looked. Cold stretches stay dashes in the line's own colour in every
+   view. */
+
+
+/* The ruler is its own row so labels are not repeated per lane. */
+.fl-ruler { display:flex; align-items:center; height:18px; border-bottom:1px solid var(--border); }
+.fl-ruler .fl-label { background:var(--bg-surface); height:18px; line-height:18px; cursor:default; }
+.fl-ruler .fl-track { height:18px; }
+.fl-ruler .fl-tick {
+  display:block; position:absolute; top:2px; font-size:10px; color:var(--text-dim);
+  transform:translateX(-50%); white-space:nowrap;
+}
+
+.tl-tip {
+  position:fixed; z-index:60; pointer-events:none; display:none;
+  background:var(--bg-surface); border:1px solid var(--border); border-radius:6px;
+  padding:8px 10px; font-size:12px; max-width:380px;
+  box-shadow:0 6px 24px rgba(0,0,0,.35);
+}
+.tl-tip h4 { margin:0 0 2px; font-size:12px; }
+.tl-tip .sub { color:var(--text-dim); font-size:11px; margin-bottom:6px;
+  font-family:ui-monospace,monospace; word-break:break-all; }
+.tl-tip dl { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin:0; }
+.tl-tip dt { color:var(--text-dim); font-size:11px; }
+.tl-tip dd { margin:0; font-family:ui-monospace,monospace; font-size:11px; }
+
+/* The tab is three stacked blocks — totals, map, events — separated by one
+   value so the rhythm is even. .tl-graph carried a margin until the chart's CSS
+   was replaced and the rule went with it, leaving the map tight against the
+   list while the totals kept their gap. */
+:root { --tl-gap:18px; }
+.tl-graph { margin-bottom:var(--tl-gap); }
+.tl-listbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.tl-listtitle { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; margin-right:4px; }
+/* Filter chip in the event list's header. */
+.tl-chip {
+  display:inline-flex; align-items:center; gap:5px;
+  background:var(--bg-surface); border:1px solid var(--purple);
+  border-radius:11px; padding:1px 4px 1px 7px; font-size:11px;
+}
+.tl-chip-name { color:var(--text-bright); max-width:180px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.tl-chip-x {
+  background:none; border:none; color:var(--text-dim); cursor:pointer;
+  font-size:11px; line-height:1; padding:2px 3px; border-radius:8px;
+}
+.tl-chip-x:hover { color:var(--text-bright); background:var(--bg-hover); }
+
+.tl-sortdir { display:inline-flex; align-items:center; padding:3px 7px; }
+.tl-arrow { width:12px; height:12px; transition:transform .18s ease; }
+.tl-arrow use { fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.tl-sortdir.up .tl-arrow { transform:rotate(180deg); }
+
+.tl-paused { font-size:11px; color:var(--yellow); display:none; margin-left:auto; }
+.tl-paused.on { display:inline; }
+.tl-list { max-height:520px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; }
+
+/* Event list: indent shows who is speaking versus what they did. */
+/* A tool call is supporting detail, so it is set smaller and tighter than the
+   conversation it sits under. The list is scanned for the shape of the
+   exchange first and the machinery second. */
+.tl-row.d0 { padding:6px 8px 6px 8px; }
+.tl-row.d1 {
+  padding:1px 8px 1px 30px; font-size:11.5px; line-height:1.35;
+  align-items:center;
+}
+.tl-row.d1 .tl-title { font-weight:500; }
+.tl-row.d1 .tl-time { font-size:10px; }
+.tl-row.d1 .tl-detail { font-size:10.5px; }
+.tl-row.d1 .tl-dur, .tl-row.d1 .tl-cost { font-size:10.5px; }
+.tl-row.d1 .ev-ic { width:11px; height:11px; flex-basis:11px; }
+/* A row that has been opened is being read, so it gets its full size back. */
+.tl-row.d1.open { padding-top:5px; padding-bottom:5px; font-size:13px; }
+.tl-row.expandable { cursor:pointer; }
+.tl-row.expandable:hover { background:var(--bg-hover); }
+.tl-row.open { background:var(--bg-hover); }
+.tl-body { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tl-expand { background:var(--bg); border-left:2px solid var(--ev-tool); }
+.tl-expand.d0 { margin-left:0; }
+.tl-expand.d1 { margin-left:22px; }
+.tl-outlabel {
+  font-size:10px; color:var(--text-dim); text-transform:uppercase;
+  letter-spacing:.05em; padding:6px 10px 0;
+}
+.tl-pre {
+  margin:0; padding:8px 10px; font-family:ui-monospace,monospace; font-size:11.5px;
+  white-space:pre-wrap; word-break:break-word; color:var(--text); max-height:340px; overflow:auto;
+}
+.tl-pre.out { color:var(--text-dim); }
+
+/* Timeline tab */
+.tl-controls { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+.tl-controls select {
+  background:var(--bg-surface); color:var(--text); border:1px solid var(--border);
+  border-radius:6px; padding:6px 10px; font-size:13px; max-width:520px;
+}
+.tl-totals { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:var(--tl-gap); }
+.tl-total { display:flex; flex-direction:column; gap:2px; }
+.tl-total .v { font-size:18px; font-weight:600; }
+.tl-total .k { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; }
+.tl-list { display:flex; flex-direction:column; }
+.tl-row {
+  position:relative;
+  display:grid; grid-template-columns:64px 20px 1fr auto auto;
+  gap:10px; align-items:baseline; padding:6px 8px;
+  font-size:13px;
+}
+.tl-row + .tl-row { border-top:1px solid var(--border); }
+
+/* The rail is drawn as a pseudo-element rather than border-left so it can sit
+   at the row's own indent. A rail pinned to the container edge said nothing
+   about depth — every row's line was in the same place. */
+.tl-row::before {
+  content:''; position:absolute; top:0; bottom:0; width:2px;
+  left:var(--rail, 0px); background:var(--border);
+}
+.tl-row.d0 { --rail:0px; }
+.tl-row.d1 { --rail:22px; }
+.tl-row.tool::before { background:var(--ev-tool); }
+.tl-row.message::before { background:var(--ev-model); }
+.tl-row.subagent { cursor:pointer; }
+.tl-row.subagent::before { background:var(--purple); }
+.tl-row.subagent:hover { background:rgba(184,154,218,.08); }
+.tl-row.err::before { background:var(--red); }
+.tl-row.prompt::before { background:var(--ev-user); }
+.tl-row.compact::before { background:var(--ev-compact); }
+/* A compaction is a hinge in the session, not another line of chat. */
+.tl-row.compact { background:rgba(232,200,114,.06); }
+.tl-row.compact .tl-title { color:var(--ev-compact); }
+.tl-time { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:11px; white-space:nowrap; }
+.tl-glyph { text-align:center; }
+.tl-title { font-weight:600; }
+.tl-detail {
+  color:var(--text-dim); font-family:ui-monospace,monospace; font-size:12px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.tl-dur, .tl-cost { color:var(--text-dim); font-family:ui-monospace,monospace; font-size:12px; white-space:nowrap; }
+.tl-dur.slow { color:var(--yellow); }
+.tl-children { margin-left:24px; border-left:2px dashed var(--purple); padding-left:8px; }
+.tl-empty { color:var(--text-dim); padding:24px; text-align:center; }
+.tl-live { font-size:11px; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,.15); color:var(--green); }
+
 /* Memories tab */
 .memories-search { margin-bottom: 20px; }
 .memories-search input {
@@ -945,10 +1335,52 @@ tr.clickable { cursor: pointer; }
   <span id="authMessage"></span>
 </div>
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- Icon vocabulary mirrors agents-observe's event registry: a tool is
+       recognised by shape before the label is read. Drawn as an inline sprite
+       rather than pulled from an icon package, because this dashboard ships as
+       one embedded HTML file with no build step. -->
+  <g id="ic-zap"><path d="M8 1 L3 8 H7 L6 13 L11 6 H7 Z"/></g>
+  <g id="ic-book"><path d="M2 2h4a2 2 0 0 1 2 2v8a2 2 0 0 0-2-2H2z"/><path d="M14 2h-4a2 2 0 0 0-2 2v8a2 2 0 0 1 2-2h4z"/></g>
+  <g id="ic-pencil"><path d="M11.5 1.5 14 4l-8 8-3 1 1-3z"/></g>
+  <g id="ic-search"><circle cx="7" cy="7" r="4"/><path d="M10 10l4 4"/></g>
+  <g id="ic-globe"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2a10 10 0 0 1 0 12A10 10 0 0 1 8 2"/></g>
+  <g id="ic-bot"><rect x="3" y="5" width="10" height="8" rx="2"/><path d="M8 2v3M6 9h.01M10 9h.01"/></g>
+  <g id="ic-plug"><path d="M6 2v4M10 2v4M4 6h8v3a4 4 0 0 1-8 0z M8 13v2"/></g>
+  <g id="ic-check"><path d="M3 8.5 6.5 12 13 4"/></g>
+  <g id="ic-msg"><path d="M2 3h12v8H6l-4 3z"/></g>
+  <g id="ic-spark"><path d="M8 2l1.6 4.4L14 8l-4.4 1.6L8 14l-1.6-4.4L2 8l4.4-1.6z"/></g>
+  <g id="ic-alert"><circle cx="8" cy="8" r="6"/><path d="M8 5v4M8 11h.01"/></g>
+  <g id="ic-fork"><path d="M5 2v5a3 3 0 0 0 3 3h3"/><circle cx="5" cy="2" r="1.6"/><circle cx="12" cy="10" r="1.6"/><circle cx="5" cy="13" r="1.6"/><path d="M5 10v1"/></g>
+  <g id="ic-arrow-down"><path d="M8 3v10M4 9l4 4 4-4"/></g>
+  <g id="ic-layers"><path d="M8 2 2 5l6 3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>
+  <g id="ic-flag"><path d="M4.5 14V3h7.5l-2 3 2 3H4.5"/></g>
+  <!-- Nimbalyst's mark: a hash inside a starburst, traced from the app's own
+       icon. Drawn as a filled path so it reads at 11px, where the icon's
+       twelve-lobed outline would turn to mush. -->
+  <symbol id="ic-nimbalyst" viewBox="0 0 24 24">
+    <path class="nb-body" d="M12 1.6c.9 0 1.3 1.1 2.2 1.2.9.1 1.6-.8 2.4-.4.8.4.5 1.5 1.1 2.1.6.6 1.7.3 2.1 1.1.4.8-.5 1.5-.4 2.4.1.9 1.2 1.3 1.2 2.2s-1.1 1.3-1.2 2.2c-.1.9.8 1.6.4 2.4-.4.8-1.5.5-2.1 1.1-.6.6-.3 1.7-1.1 2.1-.8.4-1.5-.5-2.4-.4-.9.1-1.3 1.2-2.2 1.2s-1.3-1.1-2.2-1.2c-.9-.1-1.6.8-2.4.4-.8-.4-.5-1.5-1.1-2.1-.6-.6-1.7-.3-2.1-1.1-.4-.8.5-1.5.4-2.4C4.9 12.5 3.8 12.1 3.8 11.2s1.1-1.3 1.2-2.2c.1-.9-.8-1.6-.4-2.4.4-.8 1.5-.5 2.1-1.1.6-.6.3-1.7 1.1-2.1.8-.4 1.5.5 2.4.4.9-.1 1.3-1.2 2.2-1.2z"/>
+    <path class="nb-hash" d="M10.1 6.6 9.4 15.8M14.3 6.6l-.7 9.2M7.3 9.6h9.6M6.9 12.9h9.6"
+          stroke-linecap="round"/>
+  </symbol>
+  <!-- herdr's own mark, the same artwork the scratchpad dock renders from
+       ~/.local/share/icons/herdr.svg. A symbol rather than a group, because
+       the artwork carries its own viewBox and a <use> of a group would be
+       drawn at the sprite's 16x16 scale instead of its own. Filled with
+       currentColor so it takes the row's colour. -->
+  <symbol id="ic-herdr" viewBox="125 96 240 240">
+    <clipPath id="herdr-head" clipPathUnits="userSpaceOnUse"><ellipse cx="245" cy="196" rx="130" ry="110"/></clipPath>
+    <g clip-path="url(#herdr-head)"><g fill="currentColor" transform="translate(0 512) scale(.1 -.1)" stroke="none">
+          <path d="M2794 3710 c-129 -33 -299 -135 -359 -214 -21 -28 -26 -42 -21 -63 9 -38 154 -178 199 -192 32 -11 41 -9 104 23 171 86 354 70 475 -43 150 -138 150 -379 0 -511 -107 -95 -278 -94 -386 2 l-46 40 -11 -29 c-16 -40 -14 -122 4 -164 60 -144 264 -222 452 -174 360 92 559 494 430 868 -36 103 -81 173 -175 267 -71 72 -100 93 -180 132 -52 26 -127 54 -167 62 -96 21 -230 20 -319 -4z M2183 3695 c-116 -32 -221 -108 -273 -199 -17 -28 -30 -54 -30 -58 0 -4 20 1 45 12 66 28 220 68 294 76 64 7 65 7 137 83 40 41 71 77 69 79 -2 2 -21 8 -42 13 -55 12 -140 10 -200 -6z M2212 3388 c-159 -22 -390 -122 -559 -241 -299 -210 -585 -600 -609 -828 -12 -118 40 -251 125 -318 96 -76 178 -98 426 -116 110 -8 224 -21 254 -29 125 -34 230 -115 272 -211 11 -24 24 -81 30 -127 20 -170 65 -271 166 -374 34 -35 63 -65 63 -67 0 -1 -10 -27 -22 -57 -29 -76 -37 -259 -14 -350 42 -170 158 -318 311 -397 44 -23 98 -46 120 -52 22 -6 45 -14 51 -18 5 -5 15 -48 22 -96 6 -48 14 -92 17 -97 4 -6 415 -10 1131 -10 l1124 0 0 1584 0 1585 -55 -19 c-84 -29 -143 -68 -232 -154 l-83 -78 -54 49 c-111 102 -233 151 -391 160 -113 6 -199 -10 -298 -54 l-60 -27 -26 34 c-37 51 -120 134 -127 128 -3 -4 0 -34 7 -67 17 -89 7 -268 -21 -356 -103 -328 -377 -545 -688 -545 -161 0 -273 41 -373 137 -37 35 -66 75 -85 116 -79 173 -8 407 124 407 44 0 68 -14 117 -66 74 -78 167 -82 238 -9 60 62 72 147 33 231 -42 90 -120 130 -238 122 -50 -4 -85 -14 -131 -37 -89 -45 -122 -52 -176 -40 -92 20 -262 163 -302 253 -11 25 -21 45 -22 45 -1 -1 -30 -6 -65 -11z m-256 -505 c115 -88 129 -102 132 -131 2 -18 -2 -40 -9 -49 -7 -8 -69 -55 -138 -105 -103 -73 -130 -88 -151 -83 -35 8 -51 34 -48 74 3 31 12 42 83 92 44 31 80 61 82 66 1 4 -30 31 -69 58 -39 28 -77 56 -85 63 -18 19 -16 72 4 94 32 35 63 23 199 -79z m528 -88 c23 -24 28 -52 14 -82 l-13 -28 -141 -3 c-130 -2 -142 -1 -158 17 -23 26 -24 66 -1 91 16 18 32 20 151 20 105 0 136 -3 148 -15z"/>
+    </g></g>
+  </symbol>
+  <g id="ic-rocket"><path d="M8 1c3 2 4 5 4 8l-2 2H6l-2-2c0-3 1-6 4-8z"/><path d="M6 13l-2 2M10 13l2 2"/></g>
+</defs></svg>
 <div class="tabs">
   <div class="tab active" data-tab="dashboard">Dashboard</div>
   <div class="tab" data-tab="memories">Memories <span id="staleness-badge" class="tab-badge" style="display:none">0</span></div>
   <div class="tab" data-tab="graph">Graph</div>
+  <div class="tab" data-tab="timeline">Timeline</div>
 </div>
 
 <div class="content">
@@ -1107,6 +1539,28 @@ tr.clickable { cursor: pointer; }
     <div id="graph-tooltip" class="graph-tooltip"></div>
     <div id="graph-legend" class="graph-legend"></div>
   </div>
+
+  <!-- Timeline Tab -->
+  <div class="tab-content" id="tab-timeline">
+    <div class="tl-controls">
+      <select id="tl-session"></select>
+      <span id="tl-live"></span>
+    </div>
+    <div class="tl-totals" id="tl-totals"></div>
+    <div class="tl-graph" id="tl-graph"></div>
+    <div class="tl-tip" id="tl-tip"></div>
+    <div class="tl-listbar">
+      <span class="tl-listtitle">Events</span>
+      <span id="tl-filterchip"></span>
+      <button class="fl-btn tl-sortdir" id="tl-sortdir" title="newest first — click to reverse">
+        <svg class="tl-arrow" viewBox="0 0 16 16"><use href="#ic-arrow-down"/></svg>
+      </button>
+      <span class="tl-paused" id="tl-paused">paused — scrolled away from the top</span>
+    </div>
+    <div class="tl-list" id="tl-list">
+      <div class="tl-empty">Pick a session to see what it did.</div>
+    </div>
+  </div>
 </div>
 
 <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
@@ -1142,6 +1596,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     // Re-render graph when switching to its tab (needs visible width)
     if (tab.dataset.tab === 'graph' && graphData) renderGraphView();
+    if (tab.dataset.tab === 'timeline') tlActivate();
   });
 });
 
@@ -1786,14 +2241,15 @@ document.addEventListener('keydown', e => {
   // Ignore shortcuts when typing in an input
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  const tabs = ['dashboard', 'memories', 'graph'];
-  const tabIndex = { '1': 0, '2': 1, '3': 2 }[e.key];
+  const tabs = ['dashboard', 'memories', 'graph', 'timeline'];
+  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key];
   if (tabIndex !== undefined) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.querySelector(`.tab[data-tab="${tabs[tabIndex]}"]`).classList.add('active');
     document.getElementById('tab-' + tabs[tabIndex]).classList.add('active');
     if (tabs[tabIndex] === 'graph' && graphData) renderGraphView();
+    if (tabs[tabIndex] === 'timeline') tlActivate();
     return;
   }
 
@@ -2910,6 +3366,22 @@ function connectSSE() {
     fetchProcesses();
   });
 
+  // The Timeline tab was polling on its own timer and never listened here,
+  // which is why it lagged behind a live session. `sessions` fires on every
+  // transcript write — the same push the server already does for the dashboard.
+  es.addEventListener('sessions', () => {
+    if (!tlLoaded) return;
+    tlRefresh();
+    flRefreshSoon();
+  });
+
+  // Emitted by this fork's live-session reader whenever hook state changes.
+  es.addEventListener('live', () => {
+    if (!tlLoaded) return;
+    if (tlSelected) tlRenderLive(tlSelected);
+    flRefreshSoon();
+  });
+
   es.addEventListener('memory_changed', e => {
     fetch('/api/memories').then(r => r.json()).then(data => {
       memoriesData = data;
@@ -3226,6 +3698,1493 @@ function fcFmtClock(ms) {
   const dt = new Date(ms);
   return String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
 }
+
+// --- Timeline tab ---------------------------------------------------------
+// Shows what a session actually did: prompts, replies, tool calls with how
+// long each took, and the subagents it spawned. Subagent rows expand in place
+// rather than navigating away, so the parent's ordering stays readable.
+let tlLoaded = false;
+let tlSessions = [];
+let tlSelected = null;
+let tlCurrentTimeline = null;
+let tlRefreshTimer = null;
+let flRefreshTimer = null;
+const tlExpanded = new Set();
+
+function fmtDur(ms) {
+  if (!ms) return '';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  const m = Math.floor(ms / 60000);
+  const sec = Math.round((ms % 60000) / 1000);
+  if (m < 60) return m + 'm ' + sec + 's';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+function fmtCostSmall(v) {
+  if (!v) return '';
+  return v < 0.01 ? '<$0.01' : '$' + v.toFixed(2);
+}
+
+// Maps a tool or event to an icon, following agents-observe's registry so the
+// same work looks the same in both dashboards.
+const EV_ICONS = {
+  Bash: ['ic-zap', 'ic-tool', true],
+  Read: ['ic-book', 'ic-tool', false],
+  Write: ['ic-pencil', 'ic-tool', false],
+  Edit: ['ic-pencil', 'ic-tool', false],
+  MultiEdit: ['ic-pencil', 'ic-tool', false],
+  NotebookEdit: ['ic-pencil', 'ic-tool', false],
+  Glob: ['ic-search', 'ic-tool', false],
+  Grep: ['ic-search', 'ic-tool', false],
+  WebSearch: ['ic-globe', 'ic-tool', false],
+  WebFetch: ['ic-globe', 'ic-tool', false],
+  Task: ['ic-bot', 'ic-agent', false],
+  TodoWrite: ['ic-check', 'ic-tool', false],
+  ToolSearch: ['ic-plug', 'ic-mcp', false],
+};
+
+function evIcon(e) {
+  let id = 'ic-spark', tone = 'ic-model', filled = true;
+  if (e.kind === 'compact') { id = 'ic-layers'; tone = 'ic-compact'; filled = false; }
+  else if (e.kind === 'prompt') { id = 'ic-msg'; tone = 'ic-user'; filled = false; }
+  else if (e.kind === 'subagent') { id = 'ic-bot'; tone = 'ic-agent'; filled = false; }
+  else if (e.kind === 'tool') {
+    // An MCP tool is named server__tool; anything unmapped falls back to the
+    // generic tool look rather than the model spark.
+    const hit = EV_ICONS[e.title] ||
+      (String(e.title).includes('__') ? ['ic-plug', 'ic-mcp', false] : ['ic-zap', 'ic-tool', true]);
+    [id, tone, filled] = hit;
+  }
+  if (e.is_error) tone = 'ic-err';
+  return `<svg class="ev-ic${filled ? ' fill' : ''} ${tone}" viewBox="0 0 16 16"><use href="#${id}"/></svg>`;
+}
+
+function tlLoadSessions() {
+  return fetch('/api/sessions?range=all&limit=100')
+    .then(r => r.json())
+    .then(data => {
+      tlSessions = (data.sessions || data || []).slice();
+      tlSessions.sort((a, b) => new Date(b.last_activity) - new Date(a.last_activity));
+      const sel = document.getElementById('tl-session');
+      if (!tlSessions.length) {
+        sel.innerHTML = '<option value="">No sessions found</option>';
+        return;
+      }
+      sel.innerHTML = tlSessions.map(x => {
+        const when = fmtTimeAgo(x.last_activity);
+        return `<option value="${escHtml(x.id)}">${escHtml(shortProject(x.project || x.cwd))} — ${escHtml(when)}</option>`;
+      }).join('');
+      flSelectSession(tlSessions[0].id);
+    })
+    .catch(() => {
+      document.getElementById('tl-list').innerHTML =
+        '<div class="tl-empty">Could not load sessions.</div>';
+    });
+}
+
+function tlLoad(sessionId) {
+  if (!sessionId) return;
+  tlExpanded.clear();
+  const list = document.getElementById('tl-list');
+  list.innerHTML = '<div class="tl-empty">Reading transcript…</div>';
+
+  fetch('/api/timeline/' + encodeURIComponent(sessionId))
+    .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
+    .then(tl => {
+      tlCurrentTimeline = tl;
+      tlRenderTotals(tl.totals);
+      tlRenderEvents(tl, sessionId);
+      tlRenderLive(sessionId);
+      document.getElementById('tl-list').scrollTop = 0;
+      tlSetPausedFlag();
+      tlSyncReadMarker();
+    })
+    .catch(() => {
+      document.getElementById('tl-totals').innerHTML = '';
+      list.innerHTML = '<div class="tl-empty">No transcript for that session.</div>';
+    });
+}
+
+function tlRenderTotals(t) {
+  if (!t) { document.getElementById('tl-totals').innerHTML = ''; return; }
+  const cells = [
+    ['events', t.events],
+    ['tools', t.tool_calls],
+    ['subagents', t.subagents],
+    ['errors', t.errors],
+    ...(t.compactions ? [['compacted', t.compactions]] : []),
+    ['cost', '$' + (t.cost_usd || 0).toFixed(2)],
+    // Parallel calls each count in full, so this is work done, not elapsed.
+    ['tool time', fmtDur(t.tool_ms) || '0s'],
+  ];
+  document.getElementById('tl-totals').innerHTML = cells.map(([k, v]) =>
+    `<div class="tl-total"><span class="v">${escHtml(String(v))}</span><span class="k">${k}</span></div>`
+  ).join('');
+}
+
+// A tool call this slow is worth the eye going to it.
+const TL_SLOW_MS = 30000;
+
+function tlEventRow(e, sessionId) {
+  const cls = ['tl-row', e.kind];
+  if (e.is_error) cls.push('err');
+  // 24-hour: "03:53:22 AM" does not fit the time column and wrapped onto a
+  // second line, which doubled the height of every row in the list.
+  const time = e.at
+    ? new Date(e.at).toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    : '';
+  const dur = fmtDur(e.duration_ms);
+  const durCls = e.duration_ms >= TL_SLOW_MS ? 'tl-dur slow' : 'tl-dur';
+
+  let title = e.title || '';
+  let attrs = '';
+  if (e.kind === 'subagent' && e.agent) {
+    const open = tlExpanded.has(e.agent.agent_id);
+    title = (open ? '▾ ' : '▸ ') + title;
+    attrs = ` data-agent="${escHtml(e.agent.agent_id)}" data-session="${escHtml(sessionId)}"`;
+    title += ` <span class="tl-detail">${e.agent.tool_calls} tools</span>`;
+  }
+
+  // Indent level, so the shape of the conversation reads at a glance: what
+  // you said and what Claude said sit at the outer level, and the tool calls
+  // Claude made to answer sit under them.
+  const depth = (e.kind === 'prompt' || e.kind === 'message' || e.kind === 'compact') ? 0 : 1;
+  cls.push('d' + depth);
+
+  const expandable = !!(e.full || e.output);
+  if (expandable) cls.push('expandable');
+
+  return `<div class="${cls.join(' ')}"${attrs} data-seq="${e.seq}">
+    <span class="tl-time">${escHtml(time)}</span>
+    <span class="tl-glyph">${evIcon(e)}</span>
+    <span class="tl-body"><span class="tl-title">${title}</span> <span class="tl-detail">${escHtml(e.detail || '')}</span></span>
+    <span class="${durCls}">${escHtml(dur)}</span>
+    <span class="tl-cost">${escHtml(fmtCostSmall(e.cost_usd || (e.agent && e.agent.cost_usd) || 0))}</span>
+  </div>` +
+  (expandable ? `<div class="tl-expand d${depth}" id="tl-exp-${e.seq}" style="display:none"></div>` : '') +
+  (e.kind === 'subagent' && e.agent
+    ? `<div class="tl-children" id="tl-agent-${escHtml(e.agent.agent_id)}" style="display:none"></div>`
+    : '');
+}
+
+// Newest first by default: a live session's latest step is the one being
+// waited on, and it should not require a scroll to reach.
+let tlSort = 'desc';
+
+function tlRenderEvents(tl, sessionId) {
+  const list = document.getElementById('tl-list');
+  if (!tl.events || !tl.events.length) {
+    list.innerHTML = '<div class="tl-empty">That session has no recorded activity.</div>';
+    return;
+  }
+  const events = tlSort === 'desc' ? tl.events.slice().reverse() : tl.events;
+  list.innerHTML = events.map(e => tlEventRow(e, sessionId)).join('');
+}
+
+// True while the reader has scrolled away from the newest end. Refreshes are
+// held back in that state: a list that reflows under you while you are reading
+// it costs more than the freshness is worth.
+function tlListPinned() {
+  const list = document.getElementById('tl-list');
+  if (!list) return true;
+  return tlSort === 'desc' ? list.scrollTop <= 8
+                           : list.scrollTop + list.clientHeight >= list.scrollHeight - 8;
+}
+
+// Draws a chevron on the map at the time of whichever event is at the top of
+// the list, so scrolling the history moves a marker across the timeline and
+// you can see where in the session you are reading.
+function tlSyncReadMarker() {
+  const host = document.getElementById('tl-graph');
+  const list = document.getElementById('tl-list');
+  if (!host || !list || !flScale) return;
+
+  let marker = host.querySelector('.fl-read');
+  const ruler = host.querySelector('.fl-ruler .fl-track');
+  if (!ruler) return;
+  if (!marker) {
+    marker = document.createElement('i');
+    marker.className = 'fl-read';
+    ruler.appendChild(marker);
+  }
+
+  // The first row whose top edge is at or below the list's own top edge.
+  const listTop = list.getBoundingClientRect().top;
+  let at = null;
+  for (const row of list.querySelectorAll('.tl-row')) {
+    if (row.getBoundingClientRect().bottom >= listTop) {
+      const e = (tlCurrentTimeline && tlCurrentTimeline.events || [])
+        .find(x => x.seq === Number(row.dataset.seq));
+      if (e) at = new Date(e.at).getTime();
+      break;
+    }
+  }
+  if (at === null || at < flScale.from || at > flScale.to) {
+    marker.style.display = 'none';
+    return;
+  }
+  marker.style.display = 'block';
+  marker.style.left = flScale.x(at) + 'px';
+}
+
+function tlSetPausedFlag() {
+  const el = document.getElementById('tl-paused');
+  if (el) el.classList.toggle('on', !tlListPinned());
+}
+
+// Re-reads the selected session and updates the list, unless the reader has
+// scrolled into the history.
+function tlRefresh() {
+  if (!tlSelected || !tlListPinned()) { tlSetPausedFlag(); return; }
+  fetch('/api/timeline/' + encodeURIComponent(tlSelected))
+    .then(r => (r.ok ? r.json() : null))
+    .then(tl => {
+      if (!tl) return;
+      tlRenderTotals(tl.totals);
+      tlRenderEvents(tl, tlSelected);
+      tlRenderLive(tlSelected);
+    })
+    .catch(() => {});
+}
+
+// Marks the selected session live when the hooks report it running.
+function tlRenderLive(sessionId) {
+  const el = document.getElementById('tl-live');
+  el.innerHTML = '';
+  fetch('/api/live').then(r => r.json()).then(d => {
+    const s = (d.sessions || []).find(x => x.session_id === sessionId);
+    if (!s) return;
+    const label = s.label ? `${s.status} · ${s.label}` : s.status;
+    el.innerHTML = `<span class="tl-live">${escHtml(label)}</span>`;
+  }).catch(() => {});
+}
+
+// Subagent rows expand in place. Their events are fetched on demand: a session
+// can spawn dozens of agents, and loading every one up front would make the
+// first paint useless.
+// Clicking a row opens the whole argument and, for a tool call, what it
+// returned. The list shows one line so it can be scanned; the full string is
+// carried with the event so opening it costs no request.
+document.getElementById('tl-list').addEventListener('click', ev => {
+  const anyRow = ev.target.closest('.tl-row.expandable');
+  if (anyRow && !anyRow.classList.contains('subagent')) {
+    const box = document.getElementById('tl-exp-' + anyRow.dataset.seq);
+    if (!box) return;
+    if (box.style.display === 'block') { box.style.display = 'none'; anyRow.classList.remove('open'); return; }
+    const e = (tlCurrentTimeline && tlCurrentTimeline.events || [])
+      .find(x => x.seq === Number(anyRow.dataset.seq));
+    if (!e) return;
+    let html = '';
+    if (e.full) html += `<pre class="tl-pre">${escHtml(e.full)}</pre>`;
+    if (e.output) html += `<div class="tl-outlabel">output</div><pre class="tl-pre out">${escHtml(e.output)}</pre>`;
+    box.innerHTML = html || '<div class="tl-empty">Nothing more to show.</div>';
+    box.style.display = 'block';
+    anyRow.classList.add('open');
+    return;
+  }
+
+  const row = ev.target.closest('.tl-row.subagent');
+  if (!row) return;
+  const agentId = row.dataset.agent;
+  const sessionId = row.dataset.session;
+  if (!agentId) return;
+
+  const box = document.getElementById('tl-agent-' + agentId);
+  if (!box) return;
+
+  if (tlExpanded.has(agentId)) {
+    tlExpanded.delete(agentId);
+    box.style.display = 'none';
+    row.querySelector('.tl-title').innerHTML =
+      row.querySelector('.tl-title').innerHTML.replace('▾', '▸');
+    return;
+  }
+
+  tlExpanded.add(agentId);
+  box.style.display = 'block';
+  row.querySelector('.tl-title').innerHTML =
+    row.querySelector('.tl-title').innerHTML.replace('▸', '▾');
+
+  if (box.dataset.loaded) return;
+  box.innerHTML = '<div class="tl-empty">Reading agent transcript…</div>';
+  fetch(`/api/timeline/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}`)
+    .then(r => { if (!r.ok) throw new Error('not found'); return r.json(); })
+    .then(sub => {
+      box.dataset.loaded = '1';
+      box.innerHTML = (sub.events || []).map(e => tlEventRow(e, sessionId)).join('') ||
+        '<div class="tl-empty">This agent recorded nothing.</div>';
+    })
+    .catch(() => { box.innerHTML = '<div class="tl-empty">Could not load that agent.</div>'; });
+});
+
+document.getElementById('tl-session').addEventListener('change', e => flSelectSession(e.target.value));
+
+// One control, rotated to show which way time runs, instead of two buttons
+// where only the highlight said which was active.
+document.getElementById('tl-sortdir').addEventListener('click', () => {
+  tlSort = tlSort === 'desc' ? 'asc' : 'desc';
+  const btn = document.getElementById('tl-sortdir');
+  btn.classList.toggle('up', tlSort === 'asc');
+  btn.title = tlSort === 'desc' ? 'newest first — click to reverse'
+                                : 'oldest first — click to reverse';
+  if (tlCurrentTimeline) tlRenderEvents(tlCurrentTimeline, tlSelected);
+  // Land at the newest end either way: the top in one order, the bottom in
+  // the other.
+  const list = document.getElementById('tl-list');
+  list.scrollTop = tlSort === 'desc' ? 0 : list.scrollHeight;
+  tlSetPausedFlag();
+  tlSyncReadMarker();
+});
+
+document.getElementById('tl-list').addEventListener('scroll', () => {
+  tlSetPausedFlag();
+  tlSyncReadMarker();
+});
+
+// Loaded on first visit rather than at startup: parsing a transcript is real
+// work, and most visits never open this tab.
+function tlActivate() {
+  if (tlLoaded) return;
+  tlLoaded = true;
+  flLoad();
+  tlLoadSessions();
+  // A live session keeps producing events; refresh on a timer, and let
+  // tlRefresh decide whether the reader is in a position to accept them.
+  clearInterval(tlRefreshTimer);
+  // Push drives updates; these timers are a fallback for a dropped stream.
+  tlRefreshTimer = setInterval(tlRefresh, 15000);
+  // The map tails the same activity. Slower, because a session appearing or
+  // ending is a coarser event than a tool call, and each pass re-reads every
+  // session summary in the window.
+  clearInterval(flRefreshTimer);
+  flRefreshTimer = setInterval(flRefresh, 30000);
+}
+
+
+// --- Fleet gantt ----------------------------------------------------------
+// What was running, when. One row per Claude session, wherever it ran, with
+// the agents it spawned nested beneath it — each placed at the moment it was
+// spawned and drawn for as long as it stayed active.
+//
+// The unit is the session, not the project directory. A general workspace
+// hosts dozens of unrelated sessions, so grouping by directory buries them.
+//
+// The axis is real wall-clock time across a chosen window, drawn at a fixed
+// scale and scrolled horizontally. An earlier version compressed idle gaps to
+// fit one session on screen; that made every chart a different scale and
+// nothing comparable to anything else.
+
+// pxPerHour is the drawing scale; a window wider than the viewport scrolls
+// horizontally rather than being squeezed, so a short session stays a visible
+// bar instead of a sliver. tick is the spacing of ruler labels.
+const FL_WINDOWS = [
+  { key: '1h', label: '1 hour',  pxPerHour: 900, tick: 5 * 60 * 1000 },
+  { key: '3h', label: '3 hours', pxPerHour: 400, tick: 15 * 60 * 1000 },
+  { key: '1d', label: '1 day',   pxPerHour: 90,  tick: 2 * 3600 * 1000 },
+  { key: '3d', label: '3 days',  pxPerHour: 44,  tick: 6 * 3600 * 1000 },
+  { key: '1w', label: '1 week',  pxPerHour: 22,  tick: 12 * 3600 * 1000 },
+];
+
+// The label column's width is the user's to set — a row's name can be a long
+// prompt or a short repo, and only they know which they are reading for. Kept
+// in localStorage so a drag survives a reload, and clamped so it can be neither
+// dragged shut nor grown until the chart has nowhere left to draw.
+const FL_LABEL_MIN = 140;
+const FL_LABEL_MAX = 620;
+const FL_LABEL_DEFAULT = 300;
+
+// Applied once at load so the stored width is in force for the first render
+// rather than only after the first drag.
+function flInitLabelW() {
+  document.documentElement.style.setProperty('--fl-label-w', flLabelW() + 'px');
+}
+
+function flLabelW() {
+  const v = Number(localStorage.getItem('claumon.fl.labelw'));
+  if (!v || !isFinite(v)) return FL_LABEL_DEFAULT;
+  return Math.min(FL_LABEL_MAX, Math.max(FL_LABEL_MIN, v));
+}
+
+function flSetLabelW(px) {
+  const v = Math.min(FL_LABEL_MAX, Math.max(FL_LABEL_MIN, Math.round(px)));
+  localStorage.setItem('claumon.fl.labelw', String(v));
+  document.documentElement.style.setProperty('--fl-label-w', v + 'px');
+  return v;
+}
+
+let flWindow = '1d';
+let flEnd = null;            // null means "now", refreshed on each render
+let flData = null;
+let flExpanded = new Set();  // sessions whose agents are shown
+// Set when the view should jump to the right-hand (most recent) edge after
+// the next render. Only ever set from a user action: a scroll that moves on
+// its own while you are reading is worse than one that never moves.
+let flScrollToNow = true;
+// Horizontal zoom, as a multiplier on the window's own scale. The window
+// buttons are the coarse control; this is the fine one.
+let flZoom = 1;
+const FL_ZOOM_MIN = 0.25;
+const FL_ZOOM_MAX = 16;
+// When set, flRender restores this scroll position instead of leaving it to
+// the browser — used to hold the point under the cursor still while zooming.
+let flPendingScrollLeft = null;
+// The last rendered time scale, so the reading marker can be placed on scroll
+// without re-rendering the whole map.
+let flScale = null;
+// When set, the map shows only this session and the agents it spawned.
+// Focusing is how you stop reading twenty threads at once and read one.
+let flFocused = null;
+// Heat view: colour a bar by how fast it burned tokens rather than by what it
+// is. Off by default — it trades the "what am I looking at" reading for a
+// "where did it go" one, and only one of those can be the default.
+let flHeat = false;
+
+// A marker glyph drawn on a lane. Small enough to sit on a 12px bar.
+// Orders sessions so children follow the session they were split from, giving
+// lineage a shape instead of leaving two related rows to be spotted by their
+// timestamps. A session whose parent is outside the window keeps its own place:
+// a partial lineage still beats hiding the row.
+// The curve joining a parent's bar to its child's.
+//
+// Drawn as an SVG stroke at the bars' own thickness, so it reads as the same
+// line bending rather than a hairline pointing at two rectangles. It starts on
+// the parent's bar one curve-width before the split and lands exactly on the
+// child's bar, with no gap at either end.
+//
+// Geometry is tied to the row: bars sit FL_BAR_TOP from the top of a
+// FL_ROW_H row, so the parent's bar centre is one row above the child's.
+const FL_ROW_H = 34;
+const FL_BAR_TOP = 15;
+const FL_BAR_H = 5;
+const FL_CURVE_W = 20;
+
+function flForkCurve(child, childBarX, clampBar, colorOverride) {
+  const parent = flData.sessions.find(x => x.session_id === (child.forked_from || {}).session_id);
+  // The parent's own colour, so the line that bends is visibly the same line.
+  // In heat view the join carries the parent's colour at the split, so the
+  // whole line — parent, curve, child — reads as one temperature there.
+  const stroke = colorOverride || (parent && parent.is_running ? 'var(--green)' : 'var(--accent)');
+  // Full strength, like the bars it joins. The curve used to track the bars'
+  // 45% opacity so it would not read as a darker element beside them; now that
+  // nothing is drawn faint, there is nothing to match.
+  const centre = FL_BAR_H / 2;
+  const h = FL_ROW_H + FL_BAR_H;
+  const curveStart = childBarX - FL_CURVE_W;
+
+  // Where the parent's own bar ends. A split taken near the end of a session
+  // leaves the parent's bar stopping short of where the curve begins, and the
+  // curve then starts in empty space — the break this closes. The gap is filled
+  // with a straight run at the parent's level, so the parent's line, the lead-in
+  // and the curve are one stroke.
+  let lead = 0;
+  let left = Math.max(0, curveStart);
+  if (parent && typeof clampBar === 'function') {
+    const [px, pw] = clampBar(new Date(parent.started_at).getTime(),
+                              new Date(parent.ended_at).getTime());
+    const parentEndX = px + pw;
+    if (parentEndX < curveStart) {
+      left = Math.max(0, parentEndX - 1); // overlap a pixel so no seam shows
+      lead = curveStart - left;
+    }
+  }
+
+  const w = childBarX - left;
+  if (w <= 0) return '';
+  // Straight at the parent's level for the lead-in, then down to the child's,
+  // easing out and in so it leaves and arrives along the bars rather than
+  // crossing them at an angle.
+  const c0 = lead + (w - lead) * 0.55;
+  const c1 = lead + (w - lead) * 0.45;
+  const path = `M0,${centre} L${lead},${centre} C${c0},${centre} ${c1},${FL_ROW_H + centre} ${w},${FL_ROW_H + centre}`;
+  return `<svg class="fl-fork-curve" style="left:${left}px;width:${w}px;height:${h}px;top:${-(FL_ROW_H - FL_BAR_TOP)}px"
+               viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+            <path d="${path}" fill="none" stroke="${stroke}"
+                  stroke-width="${FL_BAR_H}" stroke-linecap="butt"/>
+          </svg>`;
+}
+
+// The filter, named where its effect is felt. The map has its own clear button,
+// but the event list is the thing being narrowed, so it says so too — and can be
+// released from here without going back up to the chart.
+// flLocation spells out where a session ran, in one line: repo, worktree if it
+// is a linked one, and the full path behind them. Used for hover titles, where
+// the truncated label needs expanding rather than repeating.
+function flLocation(s) {
+  const parts = [];
+  if (s.repo) parts.push(s.repo);
+  if (s.worktree) parts.push('⑂ ' + s.worktree);
+  if (s.git_branch) parts.push('(' + s.git_branch + ')');
+  const where = parts.join(' ');
+  if (s.title && where) return s.title + ' — ' + where + (s.cwd ? '\n' + s.cwd : '');
+  return s.title || where || s.cwd || '';
+}
+
+function tlRenderFilterChip() {
+  const host = document.getElementById('tl-filterchip');
+  if (!host) return;
+  if (!flFocused || !flData) { host.innerHTML = ''; return; }
+  const s = flData.sessions.find(x => x.session_id === flFocused);
+  // Same naming as the row it filters on: the task name first, the location
+  // only when there is no name for it.
+  const label = (s && (s.title || s.repo)) || flFocused.slice(0, 8);
+  const full = s ? (flLocation(s) || flFocused) : flFocused;
+  host.innerHTML = `<span class="tl-chip" title="${escHtml(full)}">` +
+    `<svg class="ev-ic ic-agent" viewBox="0 0 16 16"><use href="#ic-fork"/></svg>` +
+    `<span class="tl-chip-name">${escHtml(label)}</span>` +
+    `<button class="tl-chip-x" title="clear the filter">✕</button></span>`;
+  host.querySelector('.tl-chip-x').addEventListener('click', () => {
+    flFocused = null;
+    flRender();
+  });
+}
+
+function flOrderByLineage(sessions) {
+  const present = new Set(sessions.map(s => s.session_id));
+  const kids = new Map();
+  const roots = [];
+  for (const s of sessions) {
+    const parent = s.forked_from && s.forked_from.session_id;
+    if (parent && present.has(parent) && parent !== s.session_id) {
+      if (!kids.has(parent)) kids.set(parent, []);
+      kids.get(parent).push(s);
+    } else {
+      roots.push(s);
+    }
+  }
+  const out = [];
+  const seen = new Set();
+  const walk = (s, depth) => {
+    // Guard against a cycle: lineage is data from disk, not a promise.
+    if (seen.has(s.session_id)) return;
+    seen.add(s.session_id);
+    s._depth = depth;
+    out.push(s);
+    for (const k of (kids.get(s.session_id) || [])) walk(k, depth + 1);
+  };
+  for (const r of roots) walk(r, 0);
+  // Anything unreachable (a cycle, or a parent that is its own ancestor) is
+  // appended rather than dropped.
+  for (const s of sessions) if (!seen.has(s.session_id)) { s._depth = 0; out.push(s); }
+  return out;
+}
+
+// A thermal ramp: cold and dark through red and orange to white hot. Ordered
+// stops rather than an interpolation in one colour space, because the point is
+// that a hot bar is unmistakable, not that the gradient is perceptually even.
+const FL_HEAT_STOPS = [
+  [0.00, '#1b1b2f'],
+  [0.20, '#3b1e6e'],
+  [0.40, '#8b1e5a'],
+  [0.60, '#d63a2f'],
+  [0.78, '#f2891f'],
+  [0.90, '#ffd400'],
+  [1.00, '#fff6c8'],
+];
+
+function flHeatColor(t) {
+  const v = Math.max(0, Math.min(1, t));
+  for (let i = 1; i < FL_HEAT_STOPS.length; i++) {
+    const [p1, c1] = FL_HEAT_STOPS[i - 1];
+    const [p2, c2] = FL_HEAT_STOPS[i];
+    if (v <= p2) {
+      const f = p2 === p1 ? 0 : (v - p1) / (p2 - p1);
+      return flMixHex(c1, c2, f);
+    }
+  }
+  return FL_HEAT_STOPS[FL_HEAT_STOPS.length - 1][1];
+}
+
+function flMixHex(a, b, f) {
+  const pa = [1, 3, 5].map(i => parseInt(a.substr(i, 2), 16));
+  const pb = [1, 3, 5].map(i => parseInt(b.substr(i, 2), 16));
+  const mixed = pa.map((v, i) => Math.round(v + (pb[i] - v) * f));
+  return '#' + mixed.map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+// A CSS gradient across the bar, one stop per bucket of the session's own burn
+// series. Neighbouring stops interpolate, so a change in demand arrives as a
+// blend rather than a hard edge.
+function flHeatGradient(s, peak) {
+  const burn = s.burn || [];
+  if (!burn.length || peak <= 0) return flHeatColor(0);
+  const stops = burn.map((v, i) => {
+    const pct = (i / (burn.length - 1)) * 100;
+    return `${flHeatColor(flHeatFraction(v, peak))} ${pct.toFixed(1)}%`;
+  });
+  return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+
+// Where one bucket sits on the ramp. Logarithmic, because demand spans orders
+// of magnitude within a single session — a cache-heavy turn is thousands of
+// times a small edit — and a linear scale leaves all but the peak black.
+function flHeatFraction(v, peak) {
+  if (v <= 0) return 0;
+  return Math.min(1, Math.log10(1 + v) / Math.log10(1 + peak));
+}
+
+// The colour the parent was at the moment of a split, so a branch carries its
+// origin's heat instead of restarting cold.
+function flHeatAt(session, peak, when) {
+  const burn = session && session.burn;
+  if (!burn || !burn.length || peak <= 0) return null;
+  const st = new Date(session.started_at).getTime();
+  const en = new Date(session.ended_at).getTime();
+  if (!(en > st)) return flHeatColor(flHeatFraction(burn[0], peak));
+  const f = Math.max(0, Math.min(1, (when - st) / (en - st)));
+  const idx = Math.min(burn.length - 1, Math.floor(f * burn.length));
+  return flHeatColor(flHeatFraction(burn[idx], peak));
+}
+
+// Burn rate in tokens per hour, on a log scale.
+//
+// Rates span orders of magnitude — a session reading one file versus one
+// grinding through a repo — so a linear scale puts everything at the bottom
+// and one outlier at the top.
+function flBurnFraction(s, maxRate) {
+  const hours = Math.max(1 / 60, (new Date(s.ended_at) - new Date(s.started_at)) / 3600000);
+  const rate = (s.tokens || 0) / hours;
+  if (rate <= 0 || maxRate <= 0) return 0;
+  return Math.min(1, Math.log10(1 + rate) / Math.log10(1 + maxRate));
+}
+
+// flDashPeriod picks a dash period that divides a segment evenly.
+//
+// A repeating gradient at a fixed period leaves a partial dash at the end of
+// any segment that is not a whole multiple of it, and on the narrow segments
+// that dominate a day-wide view that partial dash IS the segment. Fitting a
+// whole number of dashes instead means an idle stretch always reads as dashes
+// — three of them or thirty — rather than as one clipped stub.
+//
+// The target period is the ideal; the count is rounded to the nearest whole
+// number and the period recomputed from it, so the texture stays close to the
+// target while always closing cleanly.
+const FL_DASH_TARGET = 7;
+
+function flDashPeriod(widthPx) {
+  if (!(widthPx > 0)) return FL_DASH_TARGET;
+  // At least two dashes, or a narrow lull is a solid block that reads as work.
+  const n = Math.max(2, Math.round(widthPx / FL_DASH_TARGET));
+  return widthPx / n;
+}
+
+function flMark(id) {
+  return `<svg class="fl-markic" viewBox="0 0 16 16"><use href="#${id}"/></svg>`;
+}
+
+function flSpec() {
+  return FL_WINDOWS.find(w => w.key === flWindow) || FL_WINDOWS[2];
+}
+
+// Reloads the map in place: same window, same scroll, same expanded rows.
+// Used by the live tick, where anything that moved the view would make the
+// chart unusable while you watch it.
+// Map refreshes are coalesced. A busy session writes its transcript several
+// times a second and each write emits `sessions`; rebuilding the map that often
+// would be wasted work and would fight the reader's scroll.
+let flRefreshPending = null;
+function flRefreshSoon() {
+  if (flRefreshPending) return;
+  flRefreshPending = setTimeout(() => { flRefreshPending = null; flRefresh(); }, 1500);
+}
+
+function flRefresh() {
+  const scroller = document.querySelector('#tl-graph .fl-scroll');
+  if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+  flLoad();
+}
+
+function flLoad() {
+  const host = document.getElementById('tl-graph');
+  const params = new URLSearchParams({ window: flWindow });
+  if (flEnd) params.set('end', new Date(flEnd).toISOString());
+  // The per-session token series costs a transcript read each, so it is only
+  // requested when something is going to draw it.
+  if (flHeat) params.set('burn', '1');
+
+  fetch('/api/fleet?' + params.toString())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .catch(err => {
+      host.innerHTML = `<div class="tl-empty">Could not load the session map (${escHtml(String(err.message || err))}).</div>`;
+      return null;
+    })
+    // Rendering is deliberately outside the fetch chain: folding it in made a
+    // render bug indistinguishable from a network failure, and reported the
+    // wrong cause for twenty minutes.
+    .then(d => { if (!d) return; flData = d; flRender(); });
+}
+
+function flRender() {
+  const host = document.getElementById('tl-graph');
+  if (!flData) return;
+
+  // Cheap and idempotent: guarantees the stored column width is in force even
+  // on the very first render, without needing a load hook of its own.
+  flInitLabelW();
+
+  const spec = flSpec();
+  const from = new Date(flData.from).getTime();
+  const to = new Date(flData.to).getTime();
+  // Pixels, so a window can be drawn wider than the viewport and scrolled.
+  // The scale is fixed per window rather than fitted, so the same duration is
+  // the same width whatever else is on screen.
+  const hours = (to - from) / 3600000;
+  const avail = Math.max(320, host.clientWidth - flLabelW() - 26);
+  // The window sets the base scale; zoom multiplies it. The fit-to-viewport
+  // floor only applies at 1x or below, so zooming in is never undone by it.
+  const scaled = Math.round(hours * spec.pxPerHour * flZoom);
+  const canvas = flZoom > 1 ? scaled : Math.max(avail, scaled);
+  const x = t => ((t - from) / (to - from)) * canvas;
+  const clampBar = (s, e) => {
+    const x0 = Math.max(0, x(Math.max(s, from)));
+    const x1 = Math.min(canvas, x(Math.min(e || s, to)));
+    // A visible floor: a two-second session in a week-wide window would
+    // otherwise round away to nothing.
+    return [x0, Math.max(3, x1 - x0)];
+  };
+
+  // Controls: window choice, and panning so the view is not stuck on "now".
+  const buttons = FL_WINDOWS.map(w =>
+    `<button class="fl-btn${w.key === flWindow ? ' on' : ''}" data-window="${w.key}">${w.label}</button>`
+  ).join('');
+  const rangeLabel = new Date(from).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) +
+    ' → ' + new Date(to).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  let html = `<div class="fl-controls">
+    <div class="fl-windows">${buttons}</div>
+    <div class="fl-pan">
+      <button class="fl-btn" data-pan="-1" title="pan back">←</button>
+      <button class="fl-btn" data-pan="0" title="jump to now">now</button>
+      <button class="fl-btn" data-pan="1" title="pan forward">→</button>
+    </div>
+    <div class="fl-pan">
+      <button class="fl-btn${flHeat ? ' on' : ''}" data-heat="1" title="colour bars by token burn rate">heat</button>
+    </div>
+    <div class="fl-pan">
+      <button class="fl-btn" data-zoom="out" title="zoom out (ctrl + scroll)">−</button>
+      <button class="fl-btn fl-zoomlabel" data-zoom="reset" title="reset zoom">${flZoom === 1 ? '1×' : (flZoom < 1 ? flZoom.toFixed(2) : flZoom.toFixed(1)) + '×'}</button>
+      <button class="fl-btn" data-zoom="in" title="zoom in (ctrl + scroll)">+</button>
+    </div>
+    <span class="fl-range">${escHtml(rangeLabel)}</span>
+    ${flFocused ? `<button class="fl-btn fl-clear" data-clear="1" title="show every session again">✕ focused</button>` : ''}
+    ${flHeat ? `<span class="fl-legend" title="tokens per hour, log scale"><i></i>cool<b></b>hot</span>` : ''}
+    <span class="fl-count">${flFocused ? '1 of ' + flData.sessions.length : flData.sessions.length + ' sessions'}</span>
+  </div>`;
+
+  // Time ruler.
+  let ticks = '';
+  const step = spec.tick;
+  for (let t = Math.ceil(from / step) * step; t <= to; t += step) {
+    const d = new Date(t);
+    const label = step >= 86400000
+      ? d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    ticks += `<span class="fl-tick" style="left:${x(t)}px">${escHtml(label)}</span>`;
+    ticks += `<i class="fl-grid" style="left:${x(t)}px"></i>`;
+  }
+  // "Now" only exists inside the window when the view has not been panned back.
+  const now = Date.now();
+  const nowMark = now >= from && now <= to ? `<i class="fl-now" style="left:${x(now)}px"></i>` : '';
+
+  flScale = { from, to, canvas, x };
+
+  // The hottest session in the window sets the top of the scale, so the ramp
+  // always uses its full range rather than being flattened by a fixed ceiling.
+  // The heat scale is set across every bucket of every session, not per
+  // session, so the same colour means the same demand wherever it appears.
+  // The 90th percentile tops it rather than the maximum: one runaway burst
+  // would otherwise flatten everything else to the cold end. Above it clamps.
+  let peak = 0;
+  if (flHeat) {
+    const all = [];
+    for (const s of flData.sessions) {
+      for (const v of (s.burn || [])) if (v > 0) all.push(v);
+    }
+    all.sort((a, b) => a - b);
+    peak = all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.9))] : 0;
+  }
+
+  const rows = [];
+  const base = flFocused
+    ? flData.sessions.filter(s => s.session_id === flFocused)
+    : flData.sessions;
+  // Put a split session directly beneath the one it came from, so lineage
+  // reads as a tree instead of two unrelated rows that happen to overlap.
+  const visible = flOrderByLineage(base);
+  for (const s of visible) {
+    const st = new Date(s.started_at).getTime();
+    const en = new Date(s.ended_at).getTime();
+    const open = flExpanded.has(s.session_id) || s.session_id === flFocused;
+    const agents = s.agents || [];
+
+    const caret = agents.length ? (open ? '▾ ' : '▸ ') : '';
+    // Name the row the way the user named the work. herdr's tab title is that
+    // name; a directory basename is only a fallback, and a poor one when a
+    // dozen sessions share one workspace directory.
+    const name = s.title || s.repo || 'unknown';
+    const label = `${caret}${name}${agents.length ? ` · ${agents.length}` : ''}`;
+    // The location goes underneath as context. It is dropped when it would
+    // only repeat the name.
+    let ctx = escHtml(s.repo || '');
+    if (s.worktree) ctx += `<span class="fl-wt"> ⑂ ${escHtml(s.worktree)}</span>`;
+    const forkIcon = s.forked_from
+      ? `<svg class="ev-ic fl-forkic" viewBox="0 0 16 16" title="split from another session"><use href="#ic-fork"/></svg>`
+      : '';
+    const indent = (s._depth || 0) * 12;
+    // The pane badge is the herdr join made useful: it names where the session
+    // is running and clicking it puts that pane in front of you.
+    // A session herdr is running is marked by herdr's own icon on the title,
+    // in herdr's colour. The pane address it used to print is machine detail —
+    // the row is still clickable, so the address itself said nothing a reader
+    // needed. It stays in the tooltip for when it does.
+    const inHerdr = !!s.herdr;
+    const herdrIcon = inHerdr
+      ? `<svg class="fl-herdric"><use href="#ic-herdr"/></svg>`
+      : '';
+    // A session hosted by the Nimbalyst desktop app, marked the same way: the
+    // app's own icon on the title in the app's own colour. Clicking it raises
+    // Nimbalyst — it cannot select the session, and the tooltip says so, since
+    // no route or reachable API can do that.
+    const inNimbalyst = !!s.nimbalyst;
+    const nimbIcon = inNimbalyst
+      ? `<svg class="fl-nimbic" viewBox="0 0 24 24"
+              title="open Nimbalyst — it lands on the project manager, not this session">
+           <use href="#ic-nimbalyst"/>
+         </svg>`
+      : '';
+    const meta = escHtml(new Date(st).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
+    // A line has exactly two events of its own: it began, and — if its process
+    // is gone — it ended. Everything between is state, not event: a cold
+    // context is drawn dotted and carries no mark, because nothing happened.
+    //
+    // An earlier version put a "pause" and a "resume" at every long gap. Those
+    // are not things that occur: a session does not pause, it goes cold, and it
+    // does not resume, it simply gets another message.
+    let marks = '';
+    if (st >= from && st <= to) {
+      marks += `<span class="fl-mark start" style="left:${x(st)}px"` +
+        ` data-session="${escHtml(s.session_id)}" data-mark="start">${flMark('ic-rocket')}</span>`;
+    }
+    for (const a of agents) {
+      const at = new Date(a.started_at).getTime();
+      if (at < from || at > to) continue;
+      marks += `<span class="fl-mark agent" style="left:${x(at)}px"` +
+        ` data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"` +
+        ` data-mark="spawn">${flMark('ic-bot')}</span>`;
+    }
+    // Compactions come from the focused session's own timeline, which is
+    // already loaded for the list below. They are not fetched for every row:
+    // finding them means reading each transcript in full.
+    if (s.session_id === flFocused && tlCurrentTimeline) {
+      for (const c of (tlCurrentTimeline.events || [])) {
+        if (c.kind !== 'compact') continue;
+        const ct = new Date(c.at).getTime();
+        if (ct < from || ct > to) continue;
+        marks += `<span class="fl-mark compact" style="left:${x(ct)}px"` +
+          ` data-session="${escHtml(s.session_id)}" data-mark="compact"` +
+          ` data-detail="${escHtml(c.detail || '')}">${flMark('ic-layers')}</span>`;
+      }
+    }
+    // The end mark means the process that held this session is gone — it is no
+    // longer tracked anywhere, and nothing more will ever be added to it. That
+    // is why it hangs on is_running, which now comes from the PID file rather
+    // than from guessing at file activity.
+    if (!s.is_running && en >= from && en <= to) {
+      marks += `<span class="fl-mark end" style="left:${x(en)}px"` +
+        ` data-session="${escHtml(s.session_id)}" data-mark="end">${flMark('ic-flag')}</span>`;
+    }
+
+    const sel = s.session_id === tlSelected ? ' sel' : '';
+    // The colour every stop on this line is ringed in. A live session's line is
+    // green, so its stops are too — the marks belong to the line, not to a
+    // palette of their own.
+    const lineColor = s.is_running ? 'var(--green)' : 'var(--accent)';
+    // In heat view the bar's colour carries the reading, so it is drawn
+    // thicker and fully opaque; the state colours (live, selected) would
+    // otherwise override the very thing being shown.
+    // Heat keeps the bars' own geometry — it is a colour reading, not a
+    // different chart, and a thicker bar in heat mode made the two views hard
+    // to compare.
+    // A split session's transcript replays its parent's history with the
+    // original timestamps, so its bar would otherwise span the parent's whole
+    // past and read as a duplicate. Draw the inherited stretch faintly and its
+    // own work solid, with an elbow dropping out of the parent at the moment
+    // they diverged — the branch as a shape, not a footnote.
+    // A split session's transcript replays its parent's history with the
+    // original timestamps, so drawing its full span makes it a duplicate of the
+    // parent rather than a branch. Draw only its own work, and join it to the
+    // parent with a curve of the same weight as the bars, peeled off the parent
+    // just before the split — one continuous line from parent into child.
+    // A session's bar is drawn from its activity spans when they are known:
+    // work solid, cache-cold lulls dashed, and the absences between them left
+    // undrawn so the line breaks where the session was put down and resumes
+    // where it was picked back up. Falling back to one bar when spans are
+    // absent keeps the chart working for a session whose transcript could not
+    // be read.
+    const flSeg = (fromMs, toMs, extraStyle) => {
+      const spans = (s.spans || []).filter(sp => new Date(sp.to).getTime() > fromMs);
+      if (!spans.length) {
+        const [px, pw] = clampBar(fromMs, toMs);
+        return `<div class="fl-bar session${s.is_running ? ' live' : ''}"
+                     style="left:${px}px;width:${pw}px${extraStyle}"
+                     data-session="${escHtml(s.session_id)}"></div>`;
+      }
+      let out = '';
+      for (const sp of spans) {
+        // Clip to the drawn stretch: a fork's own work starts at the
+        // divergence, and a span straddling it must not be drawn back into
+        // the parent's history.
+        const a = Math.max(fromMs, new Date(sp.from).getTime());
+        const b = Math.min(toMs, new Date(sp.to).getTime());
+        if (b < a) continue;
+        const [px, pw] = clampBar(a, b);
+        const idle = sp.kind === 'idle';
+        const cls = idle ? ' idle' : '';
+        // The heat gradient is token burn, so it goes on the stretches where
+        // tokens were actually spent. A cold stretch is the time when none
+        // were, and painting it warm claimed demand that never happened — the
+        // gradient interpolates across it, so the busier the work on either
+        // side, the hotter the lull looked.
+        //
+        // In heat view the cold stretch takes the ramp's own zero rather than
+        // the line's colour: heat replaces the palette entirely, so a stretch
+        // reverting to accent orange mid-gradient read as another temperature
+        // instead of as the absence of one. Checked against the data — every
+        // bucket falling inside an idle span carries exactly zero tokens, in
+        // every session — so the ramp's zero is the honest colour here, not an
+        // approximation of one.
+        let style = `left:${px}px;width:${pw}px${idle ? '' : extraStyle}`;
+        if (idle) {
+          style += `;--fl-dash:${flDashPeriod(pw)}px`;
+          if (flHeat) style += `;--fl-line:${FL_HEAT_STOPS[0][1]}`;
+        }
+        out += `<div class="fl-bar session${s.is_running ? ' live' : ''}${cls}"
+                     style="${style}"
+                     data-session="${escHtml(s.session_id)}"
+                     data-span="${escHtml(sp.kind)}"></div>`;
+      }
+      return out;
+    };
+
+    let bars = '';
+    let link = '';
+    const dv = s.forked_from && s.forked_from.diverged_at
+      ? new Date(s.forked_from.diverged_at).getTime() : null;
+    if (dv && dv > st && dv < en) {
+      const [ox, ow] = clampBar(dv, en);
+      let own = `left:${ox}px;width:${ow}px`;
+      let forkColor = null;
+      if (flHeat) {
+        // A branch inherits the parent's heat at the moment of the split rather
+        // than starting cold, then shades along its own burn from there.
+        const parent = flData.sessions.find(p => p.session_id === s.forked_from.session_id);
+        forkColor = flHeatAt(parent, peak, dv);
+        own += `;background:${flHeatGradient(s, peak)}`;
+      }
+      // The heat gradient is positioned against the whole bar, so it is
+      // carried onto every segment rather than restarting on each one.
+      bars = flSeg(dv, en, flHeat ? `;background:${flHeatGradient(s, peak)}` : '');
+      link = flForkCurve(s, ox, clampBar, forkColor);
+    } else {
+      bars = flSeg(st, en, flHeat ? `;background:${flHeatGradient(s, peak)}` : '');
+    }
+
+    rows.push(`<div class="fl-row${s.is_running ? ' live' : ''}${sel}${flHeat ? ' heat' : ''}"
+         style="--fl-line:${lineColor}" data-session="${escHtml(s.session_id)}">
+      <div class="fl-label" style="padding-left:${8 + indent}px" title="${escHtml(flLocation(s))}">
+        <div class="fl-l1">${herdrIcon}${nimbIcon}${forkIcon}<span class="fl-name${inHerdr ? ' herdr' : inNimbalyst ? ' nimbalyst' : ''}">${escHtml(label)}</span></div>
+        <div class="fl-l2"><span class="fl-ctx">${ctx}</span><span class="fl-when">${meta}</span></div>
+        <span class="fl-grip" title="drag to resize"></span>
+      </div>
+      <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
+        ${link}${bars}
+        ${marks}
+      </div>
+    </div>`);
+
+    if (!open) continue;
+    for (const a of agents) {
+      const [ax, aw] = clampBar(new Date(a.started_at).getTime(), new Date(a.ended_at).getTime());
+      rows.push(`<div class="fl-row agent${sel}" data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}">
+        <div class="fl-label agent" title="${escHtml(a.description || '')}">
+          <div class="fl-l1"><span class="fl-name">${escHtml(a.agent_type || 'subagent')}</span></div>
+          ${a.description ? `<div class="fl-l2"><span class="fl-ctx">${escHtml(a.description)}</span></div>` : ''}
+          <span class="fl-grip" title="drag to resize"></span>
+        </div>
+        <div class="fl-track" style="width:${canvas}px">${ticks}${nowMark}
+          <div class="fl-bar agent" style="left:${ax}px;width:${aw}px"
+               data-session="${escHtml(s.session_id)}" data-agent="${escHtml(a.agent_id)}"></div>
+        </div>
+      </div>`);
+    }
+  }
+
+  const ruler = `<div class="fl-ruler"><div class="fl-label"><span class="fl-grip" title="drag to resize"></span></div>` +
+    `<div class="fl-track" style="width:${canvas}px">${ticks}</div></div>`;
+  html += rows.length
+    ? `<div class="fl-scroll"><div class="fl-canvas">${ruler}${rows.join('')}</div></div>`
+    : '<div class="tl-empty">No sessions in this window.</div>';
+  host.innerHTML = html;
+
+  flBindControls(host);
+  flBindRows(host);
+  tlRenderFilterChip();
+  flDropStaleTip();
+
+  // Open at the right-hand edge, which is the end of the window. Sessions are
+  // listed newest first, so a left-aligned scroll hides exactly the rows the
+  // eye goes to first.
+  //
+  // Only after a user action (first load, a window change, or "now"): a chart
+  // that scrolls itself while you are reading an earlier part of the day is
+  // worse than one that stays put.
+  const scrollerEl = host.querySelector('.fl-scroll');
+  if (flPendingScrollLeft !== null && scrollerEl) {
+    const want = flPendingScrollLeft;
+    flPendingScrollLeft = null;
+    // After layout, for the same reason the jump-to-now path defers.
+    requestAnimationFrame(() => { scrollerEl.scrollLeft = want; });
+  } else if (flScrollToNow) {
+    flScrollToNow = false;
+    const scroller = host.querySelector('.fl-scroll');
+    if (scroller) {
+      // Retried rather than set once: scrollLeft against freshly written
+      // markup is dropped until the element has been laid out, and one frame
+      // is not reliably late enough. Assigning past the maximum clamps, so
+      // this needs no measurement — it only has to land after layout.
+      let tries = 12;
+      const toNow = () => {
+        scroller.scrollLeft = scroller.scrollWidth;
+        if (scroller.scrollLeft === 0 && tries-- > 0) setTimeout(toNow, 60);
+      };
+      requestAnimationFrame(toNow);
+    }
+  }
+}
+
+// Applies a zoom change while holding one point on the timeline still.
+//
+// anchorClientX is the screen x the user is pointing at; without pinning it,
+// zooming walks the view sideways and you lose the thing you were looking at.
+// Passing null anchors the centre, which is what the buttons want.
+function flApplyZoom(host, factor, anchorClientX) {
+  const scroller = host.querySelector('.fl-scroll');
+  const next = Math.min(FL_ZOOM_MAX, Math.max(FL_ZOOM_MIN, flZoom * factor));
+  if (next === flZoom) return;
+
+  if (scroller) {
+    const rect = scroller.getBoundingClientRect();
+    const viewX = anchorClientX === null
+      ? rect.width / 2
+      : Math.max(0, anchorClientX - rect.left);
+    // Position within the track, past the sticky label gutter. Clamped at 0 so
+    // pointing at the label column anchors the track's left edge rather than a
+    // negative offset.
+    const trackX = Math.max(0, scroller.scrollLeft + viewX - flLabelW());
+    const ratio = next / flZoom;
+    flPendingScrollLeft = Math.max(0, trackX * ratio + flLabelW() - viewX);
+  }
+
+  flZoom = next;
+  flRender();
+}
+
+function flBindControls(host) {
+  host.querySelectorAll('.fl-btn[data-window]').forEach(b =>
+    b.addEventListener('click', () => {
+      flWindow = b.dataset.window;
+      // The window is the coarse zoom; leaving a fine multiplier on top of it
+      // makes "3 days" mean something different each time it is picked.
+      flZoom = 1;
+      flScrollToNow = true;
+      flLoad();
+    }));
+
+  const heat = host.querySelector('.fl-btn[data-heat]');
+  if (heat) heat.addEventListener('click', () => {
+    flHeat = !flHeat;
+    const scroller = host.querySelector('.fl-scroll');
+    if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+    // Turning heat on needs data the current payload does not have: the burn
+    // series is only fetched when burn=1, and that flag is set by flLoad. This
+    // used to call flRender, which redrew from whatever was already in hand —
+    // so the bars stayed uncoloured until some unrelated SSE event happened to
+    // trigger a reload, seconds later. Fetch it now instead.
+    //
+    // Turning heat off needs nothing new, so it just redraws.
+    if (flHeat) flLoad(); else flRender();
+  });
+
+  const clear = host.querySelector('.fl-btn[data-clear]');
+  if (clear) clear.addEventListener('click', () => { flFocused = null; flRender(); });
+
+  host.querySelectorAll('.fl-btn[data-zoom]').forEach(b =>
+    b.addEventListener('click', () => {
+      const how = b.dataset.zoom;
+      if (how === 'reset') {
+        if (flZoom === 1) return;
+        flApplyZoom(host, 1 / flZoom, null);
+        return;
+      }
+      flApplyZoom(host, how === 'in' ? 1.6 : 1 / 1.6, null);
+    }));
+
+  // Ctrl + wheel zooms the time axis, which is also what a trackpad pinch
+  // sends. Without ctrl the wheel scrolls normally, so the chart never steals
+  // an ordinary page scroll.
+  const scroller = host.querySelector('.fl-scroll');
+  if (scroller) {
+    scroller.addEventListener('wheel', ev => {
+      if (!ev.ctrlKey) return;
+      ev.preventDefault();
+      // Wheel deltas vary wildly by device; only the direction is reliable.
+      flApplyZoom(host, ev.deltaY < 0 ? 1.25 : 1 / 1.25, ev.clientX);
+    }, { passive: false });
+  }
+
+  host.querySelectorAll('.fl-btn[data-pan]').forEach(b =>
+    b.addEventListener('click', () => {
+      const dir = Number(b.dataset.pan);
+      if (dir === 0) { flEnd = null; flScrollToNow = true; flLoad(); return; }
+      const span = new Date(flData.to) - new Date(flData.from);
+      // Half a window per step, so context carries across the move.
+      flEnd = (flEnd || Date.now()) + dir * span / 2;
+      if (flEnd > Date.now()) flEnd = null;
+      flLoad();
+    }));
+}
+
+// Drag-to-resize on the label column.
+//
+// Width is applied to a CSS custom property during the drag, so every row
+// follows the pointer without a re-render; the chart is only rebuilt on
+// release, because its canvas width is derived from the space left over and
+// recomputing it per pointer-move would rebuild the whole gantt at 60Hz.
+function flBindResize(host) {
+  const canvas = host.querySelector('.fl-canvas');
+  if (!canvas) return;
+
+  host.querySelectorAll('.fl-grip').forEach(grip => {
+    grip.addEventListener('pointerdown', ev => {
+      // The grip lives inside the label, which toggles a row on click. Stop
+      // here or every resize also expands or collapses something.
+      ev.preventDefault();
+      ev.stopPropagation();
+      const startX = ev.clientX;
+      const startW = flLabelW();
+      canvas.classList.add('resizing');
+      grip.setPointerCapture(ev.pointerId);
+
+      const move = e => flSetLabelW(startW + (e.clientX - startX));
+      const up = () => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        canvas.classList.remove('resizing');
+        // The track's width is a function of the label's, so the bars are only
+        // correct again after a rebuild.
+        flRender();
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+    // A label click toggles the row; the grip must not inherit that.
+    grip.addEventListener('click', ev => ev.stopPropagation());
+  });
+}
+
+function flBindRows(host) {
+  const tip = document.getElementById('tl-tip');
+
+  // Focus only. herdr can also submit prompts to another agent; a dashboard
+  // must not, because that spends someone else's context on a decision they
+  // did not make.
+  //
+  // The pane chip that used to carry this is gone — it printed an address no
+  // reader needed. Clicking the herdr icon does the same job, and the icon is
+  // already the thing that says "this is running in a pane".
+  host.querySelectorAll('.fl-herdric').forEach(el =>
+    el.addEventListener('click', ev => {
+      const row = el.closest('.fl-row');
+      const s = flData.sessions.find(x => x.session_id === row.dataset.session);
+      if (!s || !s.herdr) return;
+      ev.stopPropagation();
+      fetch('/api/herdr/focus/' + encodeURIComponent(s.herdr.pane_id), { method: 'POST' })
+        .then(r => { if (!r.ok) throw new Error('focus'); })
+        .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
+    }));
+
+  // Raises the app. Deliberately not called "focus": it cannot select the
+  // session, so naming it after herdr's focus would overstate what happens.
+  host.querySelectorAll('.fl-nimbic').forEach(el =>
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
+      fetch('/api/nimbalyst/reveal', { method: 'POST' })
+        .then(r => { if (!r.ok) throw new Error('reveal'); })
+        .catch(() => { el.classList.add('failed'); setTimeout(() => el.classList.remove('failed'), 1200); });
+    }));
+
+  flBindResize(host);
+
+  // A marker describes the moment it sits on, not the session it belongs to:
+  // hovering a spawn should answer "what was spawned here", which the session
+  // tooltip cannot.
+  host.querySelectorAll('.fl-mark').forEach(el => {
+    el.addEventListener('mouseenter', ev => {
+      const s = flData.sessions.find(x => x.session_id === el.dataset.session);
+      if (!s) return;
+      tip.innerHTML = flMarkTipHtml(s, el.dataset.mark, el.dataset.agent, el.dataset.detail, el.dataset.at);
+      tip.style.display = 'block';
+      flTipAnchor = el;
+      flPlaceTip(ev);
+    });
+    el.addEventListener('mousemove', flPlaceTip);
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; flTipAnchor = null; });
+    if (el.dataset.mark === 'spawn') {
+      el.addEventListener('click', ev => {
+        ev.stopPropagation();
+        flOpenAgent(el.dataset.session, el.dataset.agent);
+      });
+    }
+  });
+
+  host.querySelectorAll('.fl-label').forEach(el => {
+    const row = el.closest('.fl-row');
+    el.addEventListener('click', () => {
+      // A session label toggles its agents; an agent label opens that agent.
+      if (row.classList.contains('agent')) {
+        flOpenAgent(row.dataset.session, row.dataset.agent);
+        return;
+      }
+      const id = row.dataset.session;
+      // While focused there is only one thread on screen and its agents are
+      // always shown, so the caret has nothing to toggle.
+      if (flFocused === id) return;
+      if (flExpanded.has(id)) flExpanded.delete(id); else flExpanded.add(id);
+      flRender();
+    });
+  });
+
+  host.querySelectorAll('.fl-bar').forEach(el => {
+    // A bar opens the detail below: the chart says when, the list says what.
+    el.addEventListener('click', () => {
+      if (el.dataset.agent) { flOpenAgent(el.dataset.session, el.dataset.agent); return; }
+      // Clicking a thread focuses it: the map filters to that session and its
+      // agents, and the list below loads it. Clicking it again releases.
+      flFocused = flFocused === el.dataset.session ? null : el.dataset.session;
+      flSelectSession(el.dataset.session);
+    });
+    el.addEventListener('mouseenter', ev => {
+      const s = flData.sessions.find(x => x.session_id === el.dataset.session);
+      if (!s) return;
+      const a = el.dataset.agent && (s.agents || []).find(y => y.agent_id === el.dataset.agent);
+      tip.innerHTML = flTipHtml(s, a || null);
+      tip.style.display = 'block';
+      flTipAnchor = el;
+      flPlaceTip(ev);
+    });
+    el.addEventListener('mousemove', flPlaceTip);
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; flTipAnchor = null; });
+  });
+}
+
+// flSelectSession drives the detail list below the chart.
+function flSelectSession(sessionId) {
+  const sel = document.getElementById('tl-session');
+  if (sel && [...sel.options].some(o => o.value === sessionId)) sel.value = sessionId;
+  tlLoad(sessionId);
+  // Move the highlight without refetching: the map's data has not changed,
+  // only which row is being read.
+  if (flData) {
+    const scroller = document.querySelector('#tl-graph .fl-scroll');
+    if (scroller) flPendingScrollLeft = scroller.scrollLeft;
+    flRender();
+  }
+}
+
+function flOpenAgent(sessionId, agentId) {
+  flSelectSession(sessionId);
+  // The list renders asynchronously; open the agent once its row exists.
+  const tryOpen = (tries) => {
+    const row = document.querySelector(`.tl-row.subagent[data-agent="${agentId}"]`);
+    if (row) { row.click(); row.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+    if (tries > 0) setTimeout(() => tryOpen(tries - 1), 120);
+  };
+  setTimeout(() => tryOpen(20), 200);
+}
+
+// Places the tooltip beside the cursor, flipping when it would run off the
+// edge. This was lost when the previous chart was removed, leaving every
+// hover to throw before the tooltip could be positioned — which is why none
+// of them appeared.
+// The element the tooltip is currently describing, so a re-render can tell
+// whether it still exists.
+let flTipAnchor = null;
+
+// Hides the tooltip if whatever it was describing is gone from the document.
+//
+// Clicking a bar focuses the session, which rebuilds the map; the hovered
+// element is destroyed mid-hover so its mouseleave never fires, and the tooltip
+// used to sit there describing something no longer on screen until the pointer
+// happened to cross another bar. Checking the anchor rather than hiding on every
+// render means a live refresh does not yank a tooltip out from under a reader
+// whose pointer has not moved.
+function flDropStaleTip() {
+  if (flTipAnchor && flTipAnchor.isConnected) return;
+  flTipAnchor = null;
+  const tip = document.getElementById('tl-tip');
+  if (tip) tip.style.display = 'none';
+}
+
+function flPlaceTip(ev) {
+  const tip = document.getElementById('tl-tip');
+  const pad = 14;
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + pad;
+  let y = ev.clientY + pad;
+  if (x + r.width > window.innerWidth) x = ev.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight) y = ev.clientY - r.height - pad;
+  tip.style.left = Math.max(4, x) + 'px';
+  tip.style.top = Math.max(4, y) + 'px';
+}
+
+// Describes one marked moment.
+function flMarkTipHtml(s, mark, agentId, detail) {
+  const sessionStart = new Date(s.started_at);
+  const fmt = t => new Date(t).toLocaleString([], {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  if (mark === 'spawn') {
+    const a = (s.agents || []).find(y => y.agent_id === agentId);
+    if (!a) return '';
+    const start = new Date(a.started_at);
+    const rows = [
+      ['agent', a.agent_type || 'subagent'],
+      ['spawned', fmt(start)],
+      // How far into the session it started, which is what the marker's
+      // position on the bar is showing.
+      ['at', (fmtDur(start - sessionStart) || '0s') + ' into the session'],
+      ['ran for', fmtDur(new Date(a.ended_at) - start) || '—'],
+      ['in', s.repo || '—'],
+    ];
+    if (a.spawn_depth) rows.push(['depth', a.spawn_depth]);
+    return `<h4>agent spawned</h4>` +
+      (a.description ? `<div class="sub">${escHtml(a.description)}</div>` : '') +
+      '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+  }
+
+  if (mark === 'compact') {
+    return `<h4>context compacted</h4>` +
+      `<div class="sub">${escHtml(s.repo || '')}</div>` +
+      '<dl><dt>what</dt><dd>history summarised away</dd>' +
+      `<dt>detail</dt><dd>${escHtml(arguments[3] || '')}</dd></dl>`;
+  }
+
+  const isStart = mark === 'start';
+  const when = isStart ? s.started_at : s.ended_at;
+  const rows = [
+    [isStart ? 'started' : 'ended', fmt(when)],
+    ['repo', (s.repo || '—') + (s.worktree ? ' ⑂ ' + s.worktree : '')],
+    ['ran for', fmtDur(new Date(s.ended_at) - sessionStart) || '—'],
+    ['agents', (s.agents || []).length],
+    ['cost', '$' + (s.cost_usd || 0).toFixed(2)],
+  ];
+  if (s.herdr) rows.push(['pane', s.herdr.pane_id]);
+  return `<h4>session ${isStart ? 'start' : 'end'}</h4>` +
+    (s.title ? `<div class="sub">${escHtml(s.title)}</div>` : '') +
+    '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+}
+
+function flTipHtml(s, agent) {
+  const start = new Date(agent ? agent.started_at : s.started_at);
+  const end = new Date(agent ? agent.ended_at : s.ended_at);
+  const rows = [];
+
+  rows.push(['repo', s.repo || '—']);
+  if (s.worktree) rows.push(['worktree', s.worktree]);
+  if (s.title) rows.push(['task', s.title]);
+  if (s.cwd) rows.push(['tree', s.cwd]);
+  if (s.git_branch) rows.push(['branch', s.git_branch]);
+  if (s.forked_from) {
+    const ff = s.forked_from;
+    const parent = (flData.sessions.find(x => x.session_id === ff.session_id) || {}).repo;
+    rows.push(['split from', (parent ? parent + ' · ' : '') + ff.session_id.slice(0, 8)]);
+    // Say how the lineage was established: /branch names the message, /fork
+    // leaves only a copied session id behind.
+    rows.push(['lineage', ff.inferred ? 'inferred from copied history' : 'explicit']);
+    if (ff.diverged_at) {
+      rows.push(['diverged', new Date(ff.diverged_at).toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })]);
+    }
+  }
+  if (s.herdr) {
+    rows.push(['pane', s.herdr.pane_id + (s.herdr.workspace_id ? ' · ' + s.herdr.workspace_id : '')]);
+    if (s.herdr.status) rows.push(['herdr', s.herdr.status + (s.herdr.focused ? ' · focused' : '')]);
+  }
+  if (s.nimbalyst) {
+    const n = s.nimbalyst;
+    rows.push(['host', 'Nimbalyst']);
+    if (n.workspace_name) rows.push(['workspace', n.workspace_name]);
+    // Nimbalyst's status is worth its own row rather than folding into the
+    // line's state: waiting_for_input is a thing claumon cannot infer from a
+    // transcript at all, and it is the one worth acting on.
+    if (n.status) rows.push(['nimbalyst', n.status.replace(/_/g, ' ')]);
+    // Its model label is the alias the user picked ("claude-code:haiku"),
+    // which the transcript's resolved model id does not tell you.
+    if (n.model) rows.push(['picked', n.model]);
+  }
+  rows.push(['agent', agent ? (agent.agent_type || 'subagent') : 'session']);
+  if (!agent && s.model) rows.push(['model', shortModel(s.model)]);
+  rows.push(['started', start.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })]);
+  rows.push(['ran for', fmtDur(end - start) || '—']);
+  // "ran for" is wall-clock from first event to last, which for a session left
+  // open overnight is mostly absence. Say how much of it was actually work,
+  // and how the rest broke down — that is what the dashes and gaps in the bar
+  // are showing.
+  if (!agent && (s.spans || []).length) {
+    const ms = k => (s.spans || [])
+      .filter(x => x.kind === k)
+      .reduce((t, x) => t + (new Date(x.to) - new Date(x.from)), 0);
+    const active = ms('active');
+    const idle = ms('idle');
+    if (active > 0) rows.push(['working', fmtDur(active)]);
+    if (idle > 0) rows.push(['cache cold', fmtDur(idle)]);
+  }
+  if (agent) {
+    if (agent.spawn_depth) rows.push(['depth', agent.spawn_depth]);
+    // Spawn offset answers "how far into the session did this start", which is
+    // what a nested bar's position is showing.
+    rows.push(['spawned at', fmtDur(start - new Date(s.started_at)) + ' in']);
+  } else {
+    rows.push(['cost', '$' + (s.cost_usd || 0).toFixed(2)]);
+    if (s.tokens) {
+      const hours = Math.max(1 / 60, (new Date(s.ended_at) - new Date(s.started_at)) / 3600000);
+      rows.push(['tokens', fmtNum(s.tokens)]);
+      rows.push(['burn', fmtNum(Math.round(s.tokens / hours)) + '/h']);
+    }
+    rows.push(['messages', s.messages || 0]);
+    rows.push(['agents', (s.agents || []).length]);
+    if (s.is_running) rows.push(['status', 'running']);
+  }
+
+  const title = agent ? (agent.agent_type || 'subagent') : (s.repo || 'session');
+  const detail = agent ? (agent.description || '') : (s.title || s.cwd || '');
+  return `<h4>${escHtml(title)}</h4>` +
+    (detail ? `<div class="sub">${escHtml(detail)}</div>` : '') +
+    '<dl>' + rows.map(([k, v]) => `<dt>${escHtml(k)}</dt><dd>${escHtml(String(v))}</dd>`).join('') + '</dl>';
+}
+
+let flResizeTimer = null;
+window.addEventListener('resize', () => {
+  if (!flData) return;
+  clearTimeout(flResizeTimer);
+  flResizeTimer = setTimeout(flRender, 150);
+});
+
+
 </script>
 </body>
 </html>

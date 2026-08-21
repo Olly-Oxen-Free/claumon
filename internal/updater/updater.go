@@ -64,11 +64,36 @@ func AssetName() string {
 	return name
 }
 
-// NeedsUpdate returns true if the latest version differs from current.
+// NeedsUpdate reports whether the latest release differs from what is running.
+//
+// A local build carries semver build metadata naming the fork and commit, e.g.
+// "0.20.0+nirvana.3286ad6". Build metadata is explicitly outside version
+// precedence in semver, and it is the whole point here: a fork sitting on
+// upstream's current release is up to date, and saying otherwise puts a
+// permanent "update available" badge on the dashboard that can never be
+// cleared. Stripping it keeps a real upstream release detectable — once
+// upstream ships 0.21.0, the 0.20.0 base no longer matches and the badge
+// returns for a genuine reason.
 func NeedsUpdate(current, latest string) bool {
-	current = strings.TrimPrefix(current, "v")
+	current = BaseVersion(current)
 	latest = strings.TrimPrefix(latest, "v")
 	return current != latest && current != "dev"
+}
+
+// BaseVersion strips a leading "v" and any semver build metadata, leaving the
+// upstream release a build is based on.
+func BaseVersion(v string) string {
+	v = strings.TrimPrefix(v, "v")
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
+	return v
+}
+
+// IsFork reports whether this build carries fork build metadata, meaning it was
+// built from modified source rather than downloaded from upstream.
+func IsFork(v string) bool {
+	return strings.Contains(v, "+")
 }
 
 // Update downloads the given release and replaces the current binary.

@@ -23,7 +23,7 @@ const (
 	AuthOK      = "ok"
 	AuthExpired = "expired"
 
-	expiryMargin    = 5 * time.Minute
+	expiryMargin      = 5 * time.Minute
 	minReloadInterval = 30 * time.Second
 )
 

@@ -482,7 +482,7 @@ func DiscoverAll(claudeDir string) ([]*MemoryFile, error) {
 		if !projEntry.IsDir() {
 			continue
 		}
-		projName := DecodePath(projEntry.Name())
+		projName := ResolveProjectPath(projEntry.Name())
 		projDir := filepath.Join(projectsDir, projEntry.Name())
 		files = append(files, discoverProjectMemories(projDir, projName)...)
 	}
@@ -536,6 +536,39 @@ func discoverProjectMemories(projDir, projName string) []*MemoryFile {
 	}
 
 	out = append(out, globMarkdownFiles(filepath.Join(projName, ".claude", "rules"), projName, "rules")...)
+	out = append(out, discoverBrain(projName)...)
+	return out
+}
+
+// brainDirs are the brain/ subdirectories worth surfacing as memory, in the order
+// they should appear. The wiki is regenerable synthesis; raw/ is durable primary
+// evidence that survives context compaction; corrections/ records mistakes and the
+// patches that fixed them. Everything under brain/_brain/ is machine state (caches,
+// the code graph, brain_state.json) and is deliberately excluded.
+var brainDirs = []struct {
+	rel      string
+	category string
+}{
+	{filepath.Join("brain", "wiki"), "brain-wiki"},
+	{filepath.Join("brain", "raw"), "brain-raw"},
+	{filepath.Join("brain", "raw", "sessions"), "brain-raw"},
+	{filepath.Join("brain", "raw", "sources"), "brain-raw"},
+	{filepath.Join("brain", "raw", "corrections"), "brain-corrections"},
+}
+
+// discoverBrain collects a project's brain/ knowledge base, if it has one.
+// Projects without brain/ return nil, so this is a no-op for most of them.
+func discoverBrain(projName string) []*MemoryFile {
+	if projName == "" {
+		return nil
+	}
+	if info, err := os.Stat(filepath.Join(projName, "brain")); err != nil || !info.IsDir() {
+		return nil
+	}
+	var out []*MemoryFile
+	for _, d := range brainDirs {
+		out = append(out, globMarkdownFiles(filepath.Join(projName, d.rel), projName, d.category)...)
+	}
 	return out
 }
 
@@ -571,6 +604,71 @@ func readMemoryFile(path, project, category string) *MemoryFile {
 }
 
 // DecodePath converts an encoded project directory name back to a filesystem path.
+// ResolveProjectPath turns an encoded ~/.claude/projects directory name back into a
+// real filesystem path.
+//
+// DecodePath alone is lossy: the encoder maps "/", "-" and "." all to "-", so any path
+// containing a hyphen (a username like "jayden-eppcohen", a repo like
+// "Fabbed-EpicAssetManager") or a dot (".epic") decodes to a directory that does not
+// exist. That silently breaks project CLAUDE.md, project rules, and brain/ discovery.
+//
+// Rather than guess at the string, this walks the real filesystem: at each level it asks
+// which child directory, once its own name is encoded the same lossy way, matches the
+// next part of the input. Falls back to DecodePath when nothing resolves, so behaviour is
+// unchanged for inputs that were never ambiguous.
+func ResolveProjectPath(encoded string) string {
+	fallback := DecodePath(encoded)
+	if len(encoded) < 2 || encoded[0] != '-' {
+		return fallback
+	}
+
+	rest := encoded[1:]
+	cur := string(filepath.Separator)
+	for rest != "" {
+		entries, err := os.ReadDir(cur)
+		if err != nil {
+			return fallback
+		}
+		matched := ""
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			enc := encodeSegment(e.Name())
+			if enc == "" || !strings.HasPrefix(rest, enc) {
+				continue
+			}
+			// A full match ends the walk; otherwise the next char must be a separator.
+			if len(rest) != len(enc) && rest[len(enc)] != '-' {
+				continue
+			}
+			// Prefer the longest match, so "Fabbed-EpicAssetManager" beats "Fabbed".
+			if len(enc) > len(matched) {
+				matched = enc
+			}
+		}
+		if matched == "" {
+			return fallback
+		}
+		// Recover the real name for this segment by re-scanning for the winner.
+		for _, e := range entries {
+			if e.IsDir() && encodeSegment(e.Name()) == matched {
+				cur = filepath.Join(cur, e.Name())
+				break
+			}
+		}
+		rest = strings.TrimPrefix(rest[len(matched):], "-")
+	}
+	return cur
+}
+
+// encodeSegment applies the same lossy mapping Claude Code uses for project directory
+// names: "-" and "." both become "-".
+func encodeSegment(name string) string {
+	r := strings.NewReplacer("-", "-", ".", "-")
+	return r.Replace(name)
+}
+
 func DecodePath(encoded string) string {
 	if len(encoded) < 2 {
 		return encoded

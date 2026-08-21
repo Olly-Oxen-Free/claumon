@@ -33,8 +33,8 @@ type GraphData struct {
 }
 
 var (
-	sshRefRegex    = regexp.MustCompile(`\b(\w+@[\d.]+)\b`)
-	binPathRegex   = regexp.MustCompile(`~/.local/bin/(\w+)`)
+	sshRefRegex  = regexp.MustCompile(`\b(\w+@[\d.]+)\b`)
+	binPathRegex = regexp.MustCompile(`~/.local/bin/(\w+)`)
 )
 
 // BuildGraph creates a graph representation of memory files and their relationships.

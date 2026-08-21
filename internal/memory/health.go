@@ -11,26 +11,26 @@ import (
 
 // HealthScore represents the health assessment of a single memory file.
 type HealthScore struct {
-	Path           string   `json:"path"`
-	Project        string   `json:"project"`
-	Category       string   `json:"category"`
-	FMName         string   `json:"fm_name,omitempty"`
-	Overall        int      `json:"overall"`         // 0-100 weighted average
-	Freshness      int      `json:"freshness"`       // 0-100 based on age
-	Structure      int      `json:"structure"`       // 0-100 frontmatter completeness
-	Specificity    int      `json:"specificity"`     // 0-100 concrete entities vs vague prose
-	Connectedness  int      `json:"connectedness"`   // 0-100 indexed, cross-referenced
-	Suggestions    []string `json:"suggestions"`     // improvement hints
-	Prompt         string   `json:"prompt"`          // Claude Code prompt to fix issues
-	Grade          string   `json:"grade"`           // A/B/C/D/F
+	Path          string   `json:"path"`
+	Project       string   `json:"project"`
+	Category      string   `json:"category"`
+	FMName        string   `json:"fm_name,omitempty"`
+	Overall       int      `json:"overall"`       // 0-100 weighted average
+	Freshness     int      `json:"freshness"`     // 0-100 based on age
+	Structure     int      `json:"structure"`     // 0-100 frontmatter completeness
+	Specificity   int      `json:"specificity"`   // 0-100 concrete entities vs vague prose
+	Connectedness int      `json:"connectedness"` // 0-100 indexed, cross-referenced
+	Suggestions   []string `json:"suggestions"`   // improvement hints
+	Prompt        string   `json:"prompt"`        // Claude Code prompt to fix issues
+	Grade         string   `json:"grade"`         // A/B/C/D/F
 }
 
 // HealthReport is the overall health assessment for all memory files.
 type HealthReport struct {
-	Scores       []HealthScore `json:"scores"`
-	AverageScore int           `json:"average_score"`
+	Scores       []HealthScore  `json:"scores"`
+	AverageScore int            `json:"average_score"`
 	GradeCount   map[string]int `json:"grade_count"`
-	CheckedAt    int64         `json:"checked_at"`
+	CheckedAt    int64          `json:"checked_at"`
 }
 
 const (
@@ -253,7 +253,6 @@ func buildIndexedSet(files []*MemoryFile) map[string]bool {
 	}
 	return indexed
 }
-
 
 // indexPaths maps each project to its MEMORY.md path.
 func indexPaths(files []*MemoryFile) map[string]string {

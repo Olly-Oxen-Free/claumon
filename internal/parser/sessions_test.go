@@ -385,4 +385,3 @@ func TestParseSessionDetailToolResultPairing(t *testing.T) {
 		t.Error("call[0].Input should carry the raw input JSON")
 	}
 }
-
