@@ -163,6 +163,9 @@ type FleetAgent struct {
 	SpawnDepth  int       `json:"spawn_depth,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 	EndedAt     time.Time `json:"ended_at"`
+	// Children are the subagents this one spawned in turn, nested to
+	// whatever depth the session actually reached.
+	Children []FleetAgent `json:"children,omitempty"`
 }
 
 // BuildFleet returns every session overlapping [from, to], newest first.
@@ -273,7 +276,7 @@ func BuildFleet(claudeDir string, from, to time.Time, scanLimit int, withBurn bo
 			fs.Repo = filepath.Base(s.Project)
 		}
 		if path != "" {
-			fs.Agents = agentSpans(sessionDir(path, s.ID))
+			fs.Agents = agentSpans(path, sessionDir(path, s.ID))
 			if withBurn {
 				fs.Burn = BurnSeries(path, start, end)
 			}
@@ -516,23 +519,36 @@ func sessionContext(path string) (cwd, branch string, ok bool) {
 	return cwd, branch, cwd != "" || branch != ""
 }
 
-// agentSpans lists the subagents of a session as time spans.
-func agentSpans(sessDir string) []FleetAgent {
+// agentSpans lists the subagents of a session as time spans, nested under
+// whichever agent — or the session itself — actually spawned each one.
+//
+// Every agent file, at any spawn depth, sits flat in one subagents/
+// directory (see the package doc comment), so a directory listing alone
+// cannot say whose child an agent is. That takes the same toolUseId link
+// timeline.go's attachAgents uses, found by scanning each file's own
+// content for the Task tool_use block it made — not, as the rest of this
+// function does, from just a line and a stat.
+func agentSpans(path, sessDir string) []FleetAgent {
 	dir := filepath.Join(sessDir, "subagents")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	var out []FleetAgent
+
+	type node struct {
+		agent FleetAgent
+		meta  agentMeta
+	}
+	nodes := map[string]*node{}
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".jsonl") {
 			continue
 		}
 		agentID := strings.TrimSuffix(name, ".jsonl")
-		path := filepath.Join(dir, name)
+		agentPath := filepath.Join(dir, name)
 
-		start, ok := firstTimestamp(path)
+		start, ok := firstTimestamp(agentPath)
 		if !ok {
 			continue
 		}
@@ -546,17 +562,93 @@ func agentSpans(sessDir string) []FleetAgent {
 		}
 
 		meta := readMeta(filepath.Join(dir, agentID+".meta.json"))
-		out = append(out, FleetAgent{
-			AgentID:     agentID,
-			AgentType:   meta.AgentType,
-			Description: meta.Description,
-			SpawnDepth:  meta.SpawnDepth,
-			StartedAt:   start,
-			EndedAt:     end,
-		})
+		nodes[agentID] = &node{
+			meta: meta,
+			agent: FleetAgent{
+				AgentID:     agentID,
+				AgentType:   meta.AgentType,
+				Description: meta.Description,
+				SpawnDepth:  meta.SpawnDepth,
+				StartedAt:   start,
+				EndedAt:     end,
+			},
+		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
-	return out
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	// A Task call's tool_use id names the file it was made in — the
+	// session's own transcript ("") or another agent's — which is what
+	// parentOf records.
+	parentOf := map[string]string{}
+	for _, id := range taskToolUseIDs(path) {
+		parentOf[id] = ""
+	}
+	for agentID := range nodes {
+		for _, id := range taskToolUseIDs(filepath.Join(dir, agentID+".jsonl")) {
+			parentOf[id] = agentID
+		}
+	}
+
+	childrenOf := map[string][]string{}
+	for agentID, n := range nodes {
+		parent, ok := parentOf[n.meta.ToolUseID]
+		if n.meta.ToolUseID == "" || !ok {
+			// No usable link: shown at the top level, same as today.
+			parent = ""
+		}
+		childrenOf[parent] = append(childrenOf[parent], agentID)
+	}
+
+	var build func(parent string) []FleetAgent
+	build = func(parent string) []FleetAgent {
+		ids := childrenOf[parent]
+		sort.SliceStable(ids, func(i, j int) bool {
+			return nodes[ids[i]].agent.StartedAt.Before(nodes[ids[j]].agent.StartedAt)
+		})
+		var out []FleetAgent
+		for _, id := range ids {
+			a := nodes[id].agent
+			a.Children = build(id)
+			out = append(out, a)
+		}
+		return out
+	}
+	return build("")
+}
+
+// taskToolUseIDs scans a transcript for every Task tool_use block's id, the
+// signal that names which file a spawned agent's Task call actually lives
+// in. Lines are filtered on a substring before being decoded — the same
+// discipline BurnSeries (burn.go) uses, and for the same reason: this path
+// treats a full unmarshal-everything read as something to avoid.
+func taskToolUseIDs(path string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var ids []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		b := sc.Bytes()
+		if !bytes.Contains(b, []byte(`"name":"Task"`)) {
+			continue
+		}
+		var l line
+		if json.Unmarshal(b, &l) != nil || l.Message == nil {
+			continue
+		}
+		for _, blk := range decodeContent(l.Message.Content) {
+			if blk.Type == "tool_use" && blk.Name == "Task" && blk.ID != "" {
+				ids = append(ids, blk.ID)
+			}
+		}
+	}
+	return ids
 }
 
 // firstTimestamp reads the first timestamped line of a transcript.

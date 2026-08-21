@@ -374,6 +374,188 @@ func TestAgentsPairWithTheirOwnTaskCallNotTheNearestOne(t *testing.T) {
 	}
 }
 
+// agentWorkWithTask is agentWork but the agent's own turn also makes a Task
+// call, so the fixture can spawn a grandchild from inside a subagent's own
+// transcript rather than the root's.
+func agentWorkWithTask(startSec int, taskID string) []map[string]any {
+	return []map[string]any{
+		userMsg(at(startSec), "go do the thing"),
+		assistantMsg(at(startSec+1), []any{
+			toolUse("a1", "Grep", map[string]any{"pattern": "x"}),
+			toolUse(taskID, "Task", map[string]any{"description": "go deeper"}),
+		}, map[string]any{"input_tokens": 10, "output_tokens": 5}),
+		userMsg(at(startSec+4), []any{toolResult("a1", false), toolResult(taskID, false)}),
+	}
+}
+
+// TestGrandchildAgentNestsUnderItsTrueParent builds a 3-level chain —
+// session -> A -> B -> C — and checks that both Build (rooted at the
+// session) and BuildAgent (rooted at A) resolve every level, rather than
+// losing C or folding it onto an unrelated root Task call.
+func TestGrandchildAgentNestsUnderItsTrueParent(t *testing.T) {
+	// Cost needs the pricing table; without it every CostUSD is a no-op zero.
+	parser.SetPricingTable(pricing.Load(nil))
+
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{
+			toolUse("toolu_A", "Task", map[string]any{"description": "spawn A"}),
+		}, nil),
+		userMsg(at(90), []any{toolResult("toolu_A", false)}),
+	})
+	// A's own transcript makes the Task call that spawns B; B's own
+	// transcript makes the Task call that spawns C.
+	writeAgent(t, dir, id, "agent-aaa",
+		agentMeta{AgentType: "Explore", Description: "level A", ToolUseID: "toolu_A", SpawnDepth: 1},
+		agentWorkWithTask(10, "toolu_B"))
+	writeAgent(t, dir, id, "agent-bbb",
+		agentMeta{AgentType: "Plan", Description: "level B", ToolUseID: "toolu_B", SpawnDepth: 2},
+		agentWorkWithTask(30, "toolu_C"))
+	writeAgent(t, dir, id, "agent-ccc",
+		agentMeta{AgentType: "Bash", Description: "level C", ToolUseID: "toolu_C", SpawnDepth: 3},
+		agentWork(50))
+
+	// --- Build: the session's own events must carry A, with B reachable as
+	// A's child rather than appearing at the root or on an unrelated event.
+	tl, err := Build(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var aEvent *Event
+	for i := range tl.Events {
+		if tl.Events[i].Kind == KindSubagent {
+			aEvent = &tl.Events[i]
+		}
+	}
+	if aEvent == nil || aEvent.Agent == nil || aEvent.Agent.AgentID != "agent-aaa" {
+		t.Fatalf("root subagent event: %+v", aEvent)
+	}
+	// A itself must not be a leftover root-level orphan: exactly one
+	// KindSubagent event at the root.
+	subCount := 0
+	for _, e := range tl.Events {
+		if e.Kind == KindSubagent {
+			subCount++
+		}
+	}
+	if subCount != 1 {
+		t.Fatalf("root subagent count = %d, want 1 (B and C must nest, not appear at the root)", subCount)
+	}
+	if tl.Totals.Subagents != 1 {
+		t.Fatalf("root totals.subagents = %d, want 1", tl.Totals.Subagents)
+	}
+	// The cost of all three levels must roll up into the session total via
+	// finalize, with no separate rollup code.
+	if aEvent.Agent.CostUSD <= 0 {
+		t.Fatalf("A's own cost/rollup missing: %+v", aEvent.Agent)
+	}
+
+	// --- BuildAgent(A): A's own returned events must contain B as a
+	// resolved KindSubagent, not an inert Task tool row. This is the case
+	// that was completely broken before this fix.
+	aTL, err := BuildAgent(dir, id, "agent-aaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bEvent *Event
+	for i := range aTL.Events {
+		if aTL.Events[i].Kind == KindSubagent {
+			bEvent = &aTL.Events[i]
+		}
+		if aTL.Events[i].Kind == KindTool && aTL.Events[i].Title == "Task" {
+			t.Fatalf("A's own Task call was left as an inert tool row: %+v", aTL.Events[i])
+		}
+	}
+	if bEvent == nil || bEvent.Agent == nil || bEvent.Agent.AgentID != "agent-bbb" {
+		t.Fatalf("A's own events must resolve B: %+v", aTL.Events)
+	}
+
+	// --- BuildAgent(B): B's own returned events must in turn contain C,
+	// proving the recursion is not depth-limited.
+	bTL, err := BuildAgent(dir, id, "agent-bbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cEvent *Event
+	for i := range bTL.Events {
+		if bTL.Events[i].Kind == KindSubagent {
+			cEvent = &bTL.Events[i]
+		}
+	}
+	if cEvent == nil || cEvent.Agent == nil || cEvent.Agent.AgentID != "agent-ccc" {
+		t.Fatalf("B's own events must resolve C: %+v", bTL.Events)
+	}
+}
+
+// TestDepthTwoAgentDoesNotMisattachToTheRoot is the regression case: a
+// depth-2 agent (B, spawned from inside A's own transcript) must not be
+// folded onto an unrelated root-level Task call, nor appended as a root
+// orphan, when its true parent (A) is present in the fixture.
+func TestDepthTwoAgentDoesNotMisattachToTheRoot(t *testing.T) {
+	dir, id := fixture(t, []map[string]any{
+		assistantMsg(at(0), []any{
+			toolUse("toolu_A", "Task", map[string]any{"description": "spawn A"}),
+		}, nil),
+		userMsg(at(90), []any{toolResult("toolu_A", false)}),
+		// An unrelated root-level Task call, deliberately left unpaired with
+		// any agent file — before the fix, this is what B could be
+		// misattributed onto.
+		assistantMsg(at(100), []any{
+			toolUse("toolu_unrelated", "Task", map[string]any{"description": "unrelated"}),
+		}, nil),
+	})
+	writeAgent(t, dir, id, "agent-aaa",
+		agentMeta{AgentType: "Explore", Description: "level A", ToolUseID: "toolu_A", SpawnDepth: 1},
+		agentWorkWithTask(10, "toolu_B"))
+	writeAgent(t, dir, id, "agent-bbb",
+		agentMeta{AgentType: "Plan", Description: "level B", ToolUseID: "toolu_B", SpawnDepth: 2},
+		agentWork(30))
+
+	tl, err := Build(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rootSubs []Event
+	var unrelatedTask *Event
+	for i := range tl.Events {
+		switch {
+		case tl.Events[i].Kind == KindSubagent:
+			rootSubs = append(rootSubs, tl.Events[i])
+		case tl.Events[i].Kind == KindTool && tl.Events[i].Title == "Task":
+			unrelatedTask = &tl.Events[i]
+		}
+	}
+	// Only A resolves at the root; B must not appear there at all.
+	if len(rootSubs) != 1 || rootSubs[0].Agent.AgentID != "agent-aaa" {
+		t.Fatalf("root subagents = %+v, want only A", rootSubs)
+	}
+	for _, s := range rootSubs {
+		if s.Agent.AgentID == "agent-bbb" {
+			t.Fatal("B must not appear as a root-level subagent; it belongs under A")
+		}
+	}
+	// The unrelated Task call must stay a plain, unfolded tool call — not
+	// have B (or anything else) folded onto it.
+	if unrelatedTask == nil {
+		t.Fatal("the unrelated root Task call must still be present, unfolded")
+	}
+
+	// B must be reachable under A, via BuildAgent.
+	aTL, err := BuildAgent(dir, id, "agent-aaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range aTL.Events {
+		if e.Kind == KindSubagent && e.Agent != nil && e.Agent.AgentID == "agent-bbb" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("B must nest under A's own events: %+v", aTL.Events)
+	}
+}
+
 func TestAgentWithNoMetaStillAppears(t *testing.T) {
 	dir, id := fixture(t, []map[string]any{userMsg(at(0), "hi")})
 	// No Task call in the parent at all, and no toolUseId to pair on.
