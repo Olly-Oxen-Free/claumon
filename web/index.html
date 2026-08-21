@@ -570,11 +570,14 @@ tr.clickable { cursor: pointer; }
   overflow-x:auto; overflow-y:auto; max-height:560px;
   border:1px solid var(--border); border-radius:6px; background:var(--bg-surface);
   /* Keep the horizontal scrollbar visible rather than overlay-on-hover: it is
-     the only cue that there is more timeline off to the side. */
-  scrollbar-width:thin;
+     the only cue that there is more timeline off to the side. auto, not
+     thin — thin's ~10px hit target was too easy to miss when reaching for
+     the thumb. */
+  scrollbar-width:auto;
 }
-.fl-scroll::-webkit-scrollbar { height:10px; width:10px; }
-.fl-scroll::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px; }
+.fl-scroll::-webkit-scrollbar { height:16px; width:16px; }
+.fl-scroll::-webkit-scrollbar-thumb { background:var(--border); border-radius:7px; border:3px solid var(--bg-surface); }
+.fl-scroll::-webkit-scrollbar-thumb:hover { background:var(--text-dim); }
 /* max-content, not auto: the rows are flex containers and take their width
    from the parent, so an auto-sized canvas collapses to the viewport and the
    tracks overflow invisibly instead of making the container scroll. */
@@ -607,8 +610,6 @@ tr.clickable { cursor: pointer; }
    strokes are knocked out in the surface colour the way the app's icon knocks
    them out in white. */
 .fl-nimbic { width:11px; height:11px; flex:0 0 11px; color:#6291f8; cursor:pointer; }
-.fl-nimbic .nb-body { fill:currentColor; stroke:none; }
-.fl-nimbic .nb-hash { fill:none; stroke:var(--bg-surface); stroke-width:1.9; }
 .fl-nimbic:hover { color:#8fb0fb; }
 .fl-nimbic.failed { color:var(--red); }
 .fl-name.nimbalyst { color:#6291f8; }
@@ -1345,7 +1346,7 @@ tr.clickable { cursor: pointer; }
 
 /* NIMBLE panel: one section per project, one card per PRD */
 .nimble-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-.nimble-title { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.nimble-bar h3 { margin: 0; }
 .nimble-refresh {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1446,8 +1447,16 @@ tr.clickable { cursor: pointer; }
        icon. Drawn as a filled path so it reads at 11px, where the icon's
        twelve-lobed outline would turn to mush. -->
   <symbol id="ic-nimbalyst" viewBox="0 0 24 24">
-    <path class="nb-body" d="M12 1.6c.9 0 1.3 1.1 2.2 1.2.9.1 1.6-.8 2.4-.4.8.4.5 1.5 1.1 2.1.6.6 1.7.3 2.1 1.1.4.8-.5 1.5-.4 2.4.1.9 1.2 1.3 1.2 2.2s-1.1 1.3-1.2 2.2c-.1.9.8 1.6.4 2.4-.4.8-1.5.5-2.1 1.1-.6.6-.3 1.7-1.1 2.1-.8.4-1.5-.5-2.4-.4-.9.1-1.3 1.2-2.2 1.2s-1.3-1.1-2.2-1.2c-.9-.1-1.6.8-2.4.4-.8-.4-.5-1.5-1.1-2.1-.6-.6-1.7-.3-2.1-1.1-.4-.8.5-1.5.4-2.4C4.9 12.5 3.8 12.1 3.8 11.2s1.1-1.3 1.2-2.2c.1-.9-.8-1.6-.4-2.4.4-.8 1.5-.5 2.1-1.1.6-.6.3-1.7 1.1-2.1.8-.4 1.5.5 2.4.4.9-.1 1.3-1.2 2.2-1.2z"/>
-    <path class="nb-hash" d="M10.1 6.6 9.4 15.8M14.3 6.6l-.7 9.2M7.3 9.6h9.6M6.9 12.9h9.6"
+    <!-- fill/stroke set as attributes, not by the .nb-body/.nb-hash CSS
+         classes below: a <use>'s cloned symbol content is a shadow tree
+         that light-DOM descendant-combinator selectors cannot reach, so
+         those rules silently never matched and both paths fell back to
+         SVG's default black fill — currentColor/var() still resolve fine
+         as attribute values, since inheritance (not selector matching) is
+         what crosses the use boundary. -->
+    <path class="nb-body" fill="currentColor" stroke="none" d="M12 1.6c.9 0 1.3 1.1 2.2 1.2.9.1 1.6-.8 2.4-.4.8.4.5 1.5 1.1 2.1.6.6 1.7.3 2.1 1.1.4.8-.5 1.5-.4 2.4.1.9 1.2 1.3 1.2 2.2s-1.1 1.3-1.2 2.2c-.1.9.8 1.6.4 2.4-.4.8-1.5.5-2.1 1.1-.6.6-.3 1.7-1.1 2.1-.8.4-1.5-.5-2.4-.4-.9.1-1.3 1.2-2.2 1.2s-1.3-1.1-2.2-1.2c-.9-.1-1.6.8-2.4.4-.8-.4-.5-1.5-1.1-2.1-.6-.6-1.7-.3-2.1-1.1-.4-.8.5-1.5.4-2.4C4.9 12.5 3.8 12.1 3.8 11.2s1.1-1.3 1.2-2.2c.1-.9-.8-1.6-.4-2.4.4-.8 1.5-.5 2.1-1.1.6-.6.3-1.7 1.1-2.1.8-.4 1.5.5 2.4.4.9-.1 1.3-1.2 2.2-1.2z"/>
+    <path class="nb-hash" fill="none" stroke="var(--bg-surface)" stroke-width="1.9"
+          d="M10.1 6.6 9.4 15.8M14.3 6.6l-.7 9.2M7.3 9.6h9.6M6.9 12.9h9.6"
           stroke-linecap="round"/>
   </symbol>
   <!-- herdr's own mark, the same artwork the scratchpad dock renders from
@@ -1468,7 +1477,6 @@ tr.clickable { cursor: pointer; }
   <div class="tab" data-tab="memories">Memories <span id="staleness-badge" class="tab-badge" style="display:none">0</span></div>
   <div class="tab" data-tab="graph">Graph</div>
   <div class="tab" data-tab="timeline">Timeline</div>
-  <div class="tab" data-tab="nimble">NIMBLE</div>
 </div>
 
 <div class="content">
@@ -1598,6 +1606,16 @@ tr.clickable { cursor: pointer; }
         <tbody id="sessions-table"></tbody>
       </table>
     </div>
+
+    <div class="table-wrap">
+      <div class="nimble-bar">
+        <h3>NIMBLE PRDs</h3>
+        <button class="nimble-refresh" id="nimble-refresh">Refresh</button>
+      </div>
+      <div id="nimble-body">
+        <div class="empty-state">Loading...</div>
+      </div>
+    </div>
   </div>
 
   <!-- Memories Tab -->
@@ -1654,17 +1672,6 @@ tr.clickable { cursor: pointer; }
       <div class="tl-empty">Pick a session to see what it did.</div>
     </div>
   </div>
-
-  <!-- NIMBLE Tab: PRD state read straight off disk from .nimble/prds/ -->
-  <div class="tab-content" id="tab-nimble">
-    <div class="nimble-bar">
-      <span class="nimble-title">NIMBLE PRDs</span>
-      <button class="nimble-refresh" id="nimble-refresh">Refresh</button>
-    </div>
-    <div id="nimble-body">
-      <div class="empty-state">Loading...</div>
-    </div>
-  </div>
 </div>
 
 <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
@@ -1701,7 +1708,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     // Re-render graph when switching to its tab (needs visible width)
     if (tab.dataset.tab === 'graph' && graphData) renderGraphView();
     if (tab.dataset.tab === 'timeline') tlActivate();
-    if (tab.dataset.tab === 'nimble') nimbleActivate();
+    if (tab.dataset.tab === 'dashboard') nimbleActivate();
   });
 });
 
@@ -2346,8 +2353,8 @@ document.addEventListener('keydown', e => {
   // Ignore shortcuts when typing in an input
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  const tabs = ['dashboard', 'memories', 'graph', 'timeline', 'nimble'];
-  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 }[e.key];
+  const tabs = ['dashboard', 'memories', 'graph', 'timeline'];
+  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key];
   if (tabIndex !== undefined) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -2355,7 +2362,7 @@ document.addEventListener('keydown', e => {
     document.getElementById('tab-' + tabs[tabIndex]).classList.add('active');
     if (tabs[tabIndex] === 'graph' && graphData) renderGraphView();
     if (tabs[tabIndex] === 'timeline') tlActivate();
-    if (tabs[tabIndex] === 'nimble') nimbleActivate();
+    if (tabs[tabIndex] === 'dashboard') nimbleActivate();
     return;
   }
 
@@ -5228,16 +5235,17 @@ function flBindRows(host) {
   host.querySelectorAll('.fl-label').forEach(el => {
     const row = el.closest('.fl-row');
     el.addEventListener('click', () => {
-      // A session label toggles its agents. An agent label with its own
-      // children toggles those instead of opening the agent — the same
-      // expand-not-open split the session row uses; an agent with no
-      // children keeps opening it, unchanged from before nesting existed.
+      // A session label toggles its agents (gantt-only; the bar drives the
+      // event list for sessions). An agent label does both at once: toggle
+      // its gantt nesting *and* open it in the event list, the same as
+      // clicking its name always did before nesting existed — collapsing
+      // one of those two behaviors when an agent gained children was the
+      // bug, not the intended split.
       if (row.classList.contains('agent')) {
         if (Number(row.dataset.children || 0) > 0) {
           const aid = row.dataset.agent;
           if (flAgentExpanded.has(aid)) flAgentExpanded.delete(aid); else flAgentExpanded.add(aid);
           flRender();
-          return;
         }
         flOpenAgent(row.dataset.session, row.dataset.agent);
         return;
@@ -5552,6 +5560,11 @@ function nimblePrd(prd) {
 function nimbleClass(s) { return String(s || '').toLowerCase().replace(/[^a-z-]/g, ''); }
 
 document.getElementById('nimble-refresh').addEventListener('click', nimbleLoad);
+// Dashboard is the default active tab, so unlike the other sections (which
+// load when their tab is first clicked) this needs an explicit initial call
+// — nothing else will fire nimbleActivate() before the user ever leaves and
+// returns to a tab that's already showing.
+nimbleActivate();
 
 
 </script>
