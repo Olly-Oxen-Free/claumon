@@ -297,8 +297,12 @@ First PRD in this repo's `.nimble/` history — no prior checkpoints to draw on.
 
 **Known gotchas discovered since research:**
 
-- `BuildAgent` never currently calls `attachAgents` recursively — this is the literal bug
-  to fix for R2 (task 2a), not a rename/refactor. `AgentRef.SpawnDepth` is already parsed
+- `BuildAgent` never calls `attachAgents` at all (only `Build` does), and `attachAgents`
+  only matches `toolUseId` against the root session's own events — so depth-2+ subagents
+  are actively misattributed to an unrelated root-level `Task` row today, not merely
+  un-nested. This is live data corruption on already-shipped sessions, discovered by
+  brief-writer during Phase 1 — fix for R2 (task 2a) is a session-wide `toolUseId → agent`
+  pool matched depth-first/bottom-up, not a rename/refactor. `AgentRef.SpawnDepth` is already parsed
   and may cover part of the depth-tracking need.
 - `FleetAgent` (`fleet.go:158-159`) is currently a flat struct with no children field —
   2a must add one before 2b can render nesting.
