@@ -1314,6 +1314,65 @@ tr.clickable { cursor: pointer; }
 .bar-chart { width: 100%; }
 .bar-label { font-size: 10px; fill: var(--text-dim); }
 .bar-value { font-size: 9px; fill: var(--text-dim); }
+
+/* NIMBLE panel: one section per project, one card per PRD */
+.nimble-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.nimble-title { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.nimble-refresh {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.nimble-refresh:hover { background: var(--bg-hover); color: var(--text-bright); }
+.nimble-project { margin-bottom: 20px; }
+.nimble-project-path {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.nimble-prd { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.nimble-prd-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.nimble-slug { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+.nimble-meta { font-size: 11px; color: var(--text-dim); }
+.nimble-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-dim);
+}
+.nimble-status.running, .nimble-status.executing { color: var(--yellow); border-color: var(--yellow); }
+.nimble-status.done, .nimble-status.complete, .nimble-status.merged { color: var(--green); border-color: var(--green); }
+.nimble-status.blocked, .nimble-status.failed { color: var(--red); border-color: var(--red); }
+.nimble-waves { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.nimble-wave { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+.nimble-wave .nimble-wave-num { color: var(--text-bright); font-weight: 600; }
+.nimble-wave.running { border-color: var(--yellow); }
+.nimble-wave.complete { border-color: var(--green); }
+.nimble-wave.blocked { border-color: var(--red); }
+.nimble-alerts { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.nimble-alert { font-size: 11px; display: flex; align-items: baseline; gap: 8px; }
+.nimble-alert-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  padding: 0 5px;
+  flex: none;
+}
+.nimble-alert-kind.stale { color: var(--yellow); border-color: var(--yellow); }
+.nimble-alert-task { color: var(--text-bright); font-family: ui-monospace, monospace; }
+.nimble-alert-title { color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -1381,6 +1440,7 @@ tr.clickable { cursor: pointer; }
   <div class="tab" data-tab="memories">Memories <span id="staleness-badge" class="tab-badge" style="display:none">0</span></div>
   <div class="tab" data-tab="graph">Graph</div>
   <div class="tab" data-tab="timeline">Timeline</div>
+  <div class="tab" data-tab="nimble">NIMBLE</div>
 </div>
 
 <div class="content">
@@ -1561,6 +1621,17 @@ tr.clickable { cursor: pointer; }
       <div class="tl-empty">Pick a session to see what it did.</div>
     </div>
   </div>
+
+  <!-- NIMBLE Tab: PRD state read straight off disk from .nimble/prds/ -->
+  <div class="tab-content" id="tab-nimble">
+    <div class="nimble-bar">
+      <span class="nimble-title">NIMBLE PRDs</span>
+      <button class="nimble-refresh" id="nimble-refresh">Refresh</button>
+    </div>
+    <div id="nimble-body">
+      <div class="empty-state">Loading...</div>
+    </div>
+  </div>
 </div>
 
 <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
@@ -1597,6 +1668,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     // Re-render graph when switching to its tab (needs visible width)
     if (tab.dataset.tab === 'graph' && graphData) renderGraphView();
     if (tab.dataset.tab === 'timeline') tlActivate();
+    if (tab.dataset.tab === 'nimble') nimbleActivate();
   });
 });
 
@@ -2241,8 +2313,8 @@ document.addEventListener('keydown', e => {
   // Ignore shortcuts when typing in an input
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-  const tabs = ['dashboard', 'memories', 'graph', 'timeline'];
-  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key];
+  const tabs = ['dashboard', 'memories', 'graph', 'timeline', 'nimble'];
+  const tabIndex = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 }[e.key];
   if (tabIndex !== undefined) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -2250,6 +2322,7 @@ document.addEventListener('keydown', e => {
     document.getElementById('tab-' + tabs[tabIndex]).classList.add('active');
     if (tabs[tabIndex] === 'graph' && graphData) renderGraphView();
     if (tabs[tabIndex] === 'timeline') tlActivate();
+    if (tabs[tabIndex] === 'nimble') nimbleActivate();
     return;
   }
 
@@ -5183,6 +5256,78 @@ window.addEventListener('resize', () => {
   clearTimeout(flResizeTimer);
   flResizeTimer = setTimeout(flRender, 150);
 });
+
+
+// --- NIMBLE panel ---------------------------------------------------------
+// NIMBLE keeps its whole view of a PRD run in files under .nimble/prds/, and
+// its own dashboard command re-reads them on every invocation. There is no
+// stream to subscribe to, so this loads when the tab is opened and whenever
+// the reader asks again.
+let nimbleLoaded = false;
+
+function nimbleActivate() {
+  if (nimbleLoaded) return;
+  nimbleLoaded = true;
+  nimbleLoad();
+}
+
+function nimbleLoad() {
+  fetch('/api/nimble/prds')
+    .then(r => r.json())
+    .then(nimbleRender)
+    .catch(() => {
+      document.getElementById('nimble-body').innerHTML =
+        '<div class="empty-state">Could not read NIMBLE state.</div>';
+    });
+}
+
+function nimbleRender(data) {
+  const projects = (data && data.projects) || [];
+  const body = document.getElementById('nimble-body');
+  if (!projects.length) {
+    body.innerHTML = '<div class="empty-state">No NIMBLE PRDs found</div>';
+    return;
+  }
+  body.innerHTML = projects.map(p => `
+    <div class="nimble-project">
+      <div class="nimble-project-path">${escHtml(p.path)}</div>
+      ${(p.prds || []).map(nimblePrd).join('')}
+    </div>`).join('');
+}
+
+function nimblePrd(prd) {
+  const waves = (prd.waves || []).map(w => `
+    <span class="nimble-wave ${nimbleClass(w.status)}">
+      <span class="nimble-wave-num">Wave ${w.number}</span> ${w.done}/${w.tasks} · ${escHtml(w.status)}
+    </span>`).join('');
+  const alerts = (prd.alerts || []).map(a => `
+    <div class="nimble-alert">
+      <span class="nimble-alert-kind ${nimbleClass(a.kind)}">${escHtml(a.kind)}</span>
+      <span class="nimble-alert-task">${escHtml(a.task_id)}</span>
+      <span class="nimble-alert-title">${escHtml(a.title || a.status)}</span>
+    </div>`).join('');
+  const meta = [
+    prd.task_count ? prd.task_count + ' tasks' : '',
+    prd.execution_mode || '',
+    prd.feature_branch || ''
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="nimble-prd">
+      <div class="nimble-prd-head">
+        <span class="nimble-slug">${escHtml(prd.prd_slug)}</span>
+        <span class="nimble-status ${nimbleClass(prd.status)}">${escHtml(prd.status)}</span>
+        <span class="nimble-meta">${escHtml(meta)}</span>
+      </div>
+      ${waves ? `<div class="nimble-waves">${waves}</div>` : ''}
+      ${alerts ? `<div class="nimble-alerts">${alerts}</div>` : ''}
+    </div>`;
+}
+
+// Status words come from NIMBLE's own vocabulary, which may grow; keep only
+// what is safe to drop into a class attribute.
+function nimbleClass(s) { return String(s || '').toLowerCase().replace(/[^a-z-]/g, ''); }
+
+document.getElementById('nimble-refresh').addEventListener('click', nimbleLoad);
 
 
 </script>
